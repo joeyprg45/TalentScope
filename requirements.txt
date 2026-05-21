@@ -1,0 +1,5 @@
+notion-client
+python-dotenv
+slack_sdk
+azure-cosmos
+openai

@@ -1,0 +1,17 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(uv run *)",
+      "Bash(uv add *)",
+      "Bash(uv tree *)",
+      "Bash(Get-ChildItem -Path \"g:\\\\マイドライブ\\\\Microsoft_AI_hackason\\\\TalentScope\\\\\" -Recurse -ErrorAction SilentlyContinue | Select-Object FullName | ConvertTo-Json -Depth 10)",
+      "Read(//g/�}�C�h���C�u/Microsoft_AI_hackason/**)",
+      "Bash(python scripts/seed_slack_demo.py)",
+      "Bash(.venv\\\\Scripts\\\\python.exe scripts/seed_slack_demo.py)",
+      "Bash(.venv\\\\Scripts\\\\python.exe scripts/verify_slack.py)",
+      "PowerShell(Get-Command python, py, uv -ErrorAction SilentlyContinue)",
+      "PowerShell(& \"C:\\\\Users\\\\jok\\\\AppData\\\\Local\\\\Programs\\\\Python\\\\Python311\\\\python.exe\" \"g:\\\\�}�C�h���C�u\\\\Microsoft_AI_hackason\\\\TalentScope\\\\scripts\\\\verify_slack.py\" 2>&1)",
+      "Bash(.venv/Scripts/pip list *)"
+    ]
+  }
+}
