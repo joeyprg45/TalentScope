@@ -10,4 +10,9 @@ dependencies = [
     "slack_sdk>=3.0.0",
     "azure-cosmos>=4.7.0",
     "openai>=1.0.0",
+    "semantic-kernel>=1.18.0",
+    "chainlit>=1.3.0",
+    "streamlit>=1.40.0",
+    "plotly>=5.0.0",
+    "streamlit-calendar>=1.0.0",
 ]

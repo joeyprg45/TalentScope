@@ -3,7 +3,7 @@
 > このドキュメントは「唯一の実装計画書」。アイデアが固まるたびに更新する。
 > 破棄したアイデアは消す。最終的に一枚の完成した計画書になる状態を目指す。
 >
-> 最終更新: 2026-05-22
+> 最終更新: 2026-05-23
 
 ---
 
@@ -87,10 +87,14 @@
   4. **昇給レコメンド**: 貢献度・スキル成長・チームへの影響度をもとにした昇給推奨コメント（メンバー別）
   5. **プロジェクトコスト試算**: 提案チームの月次コスト × 期間 = 総コスト
 - スキルギャップ・チームバランス評価も同時に提示する
-- **提案軸の切り替え（会話で指定可能）:**
-  - 「能力重視」: スキル・貢献度・適性を最優先
-  - 「コスト重視」: 総コストを抑えながら要件を満たすチームを提案
-  - 会話で「もう少し安くして」と言うと、コストを下げた代替案を再提示する
+- **提案軸（UI ボタンで選択）:**
+
+| 軸 | キー | 概要 | プロンプトファイル |
+|---|---|---|---|
+| 🎯 能力重視 | `ability` | 必要スキルを最大カバー | `assignment.txt` |
+| 💰 コスト重視 | `cost` | 予算内で最もコスト効率のよいチーム | `assignment.txt`（`{axis}` 変数で切替） |
+| 🌱 育成・チャレンジ重視 | `growth` | 未経験スキルへのストレッチ機会を設計。シニアアンカー1名+若手中心で構成 | `assignment_growth.txt` |
+| 🤝 チームワーク重視 | `synergy` | 過去の協働実績（共同PJ数×2+会議数）が最大のチームを選ぶ | `assignment_synergy.txt` |
 
 ### 4.4.1 アサインカレンダー
 - 各メンバーが「どのPJに・いつから・いつまで」在籍しているかを管理する
@@ -197,11 +201,22 @@
    - [x] `ingest/run_ingest.py` — 全体オーケストレータ
    - [ ] `ingest/notion_ingest.py` — **要修正**: 議事録をチャンク+埋め込みではなく、全文+LLM要約+member_analyses[]として1ドキュメント保存に変更
    - [ ] `python -m ingest.run_ingest` 実行（Slackデモデータ投入後）
-5. エージェント実装（Semantic Kernel）← **次の主タスク**
+5. エージェント実装（Semantic Kernel）— ✅ **完了**
+   - [x] `agents/orchestrator.py` — ChatCompletionAgent + FunctionChoiceBehavior.Auto() (ReAct)
+   - [x] `agents/plugins/member_plugin.py` / `project_plugin.py` / `contribution_plugin.py` / `meeting_plugin.py`
+   - [x] `agents/plugins/team_balance_plugin.py` — チームバランス評価
+   - [x] `agents/plugins/synergy_plugin.py` — 協働実績マトリクス（Cosmos DB直接集計）
+   - [x] `agents/prompts/` — base_chat / skill_analysis / assignment / assignment_growth / assignment_synergy
+   - [x] `agents/report.py` — レポートヘッダ/フッタフォーマッタ
 
-### フェーズ3: チャットUI → Azureデプロイ・仕上げ
-- Chat UI: **Chainlit**（ボタン切り替えでモード選択）
-- Azure 実行基盤: **Azure Container Apps**（コンテナデプロイ。実行時間制限なし）
+### ✅ フェーズ3（進行中）: チャットUI → Azureデプロイ・仕上げ
+- [x] Chat UI: **Chainlit** — 常時チャット対応。自然文インテント検出でスキル分析/アサイン提案を起動
+- [x] 個人スキル分析レポート（サイドパネル + Markdownダウンロード）
+- [x] アサイン提案レポート 4軸（能力/コスト/育成/シナジー）
+- [ ] `ingest/notion_ingest.py` 修正 — 議事録を LLM要約+`member_analyses[]`として保存
+- [ ] Slack デモデータ投入（`seed_slack_demo.py`）
+- [ ] Azure Container Apps デプロイ
+- [ ] Zenn 記事 / 3分デモ動画 / アーキテクチャ図
 - 審査期間 2026/6/2〜6/18 に動作可能な状態を維持
 
 ---
@@ -354,6 +369,14 @@ Cosmos DBへのアクセスはすべて `@kernel_function` で実装し、各エ
 
 なし。Orchestratorが生成した「提案チーム構成」をテキストで受け取り、LLMが推論して返す。
 
+### [F] SynergyPlugin のツール（チームワーク重視モードで使用）
+
+| ツール | 概要 |
+|---|---|
+| `get_collaboration_matrix(member_ids_json)` | 指定メンバーの全ペアについて、過去の共同PJ数・会議参加数・シナジースコア（PJ×2+会議）を集計して返す。Cosmos DBから決定論的に算出（LLM推論なし） |
+
+> シナジースコア式: `shared_projects × 2 + shared_meetings`（PJは会議より長期の関係のため2倍重み）
+
 ---
 
 ## 6.7 レポート出力設計
@@ -365,10 +388,15 @@ Cosmos DBへのアクセスはすべて `@kernel_function` で実装し、各エ
 - チャット本体には「レポートを生成しました」+ サマリー1〜2行のみ表示する
 
 ### レポートが出力されるタイミング
+
+チャットは常時有効。モードに関係なく任意のメッセージを送れる。
+
 | モード | トリガー |
 |---|---|
-| 👤 個人スキル分析 | モードボタン押下 → 対象メンバーを確認 → 「生成」または自動生成 |
-| 📋 アサイン提案 | モードボタン押下 → 対象プロジェクトを確認 → 提案軸選択 → 自動生成 |
+| 👤 個人スキル分析 | 「佐藤健太のスキルを分析して」など**スキルキーワード+メンバー名**を含む自然文。または 👤ボタン でヒント表示後に入力 |
+| 📋 アサイン提案 | 「次世代LLMのアサインを決めて」など**アサインキーワード+プロジェクト名**を含む自然文。または 📋ボタン でヒント表示後に入力 |
+
+> `KEY_AWAIT_STEP` によるチャットブロック機構は廃止。`on_message` 内でキーワード+Cosmos DBエンティティ照合によるインテント検出に変更（2026-05-23）。
 
 ### 👤 個人スキルレポート 構成
 
