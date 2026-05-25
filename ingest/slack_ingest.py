@@ -19,6 +19,13 @@ TWEET_CHANNEL_MAP: dict[str, dict] = {
     "C0B51HALTNV": {"name": "tweet_kobayashi", "member_email": "kobayashi@abc.com"},
     "C0B4TB12T7D": {"name": "tweet_maeda",     "member_email": "maeda@abc.com"},
     "C0B4JGP19NX": {"name": "tweet_sato",      "member_email": "sato@abc.com"},
+    "C0B5VR6BZH8": {"name": "tweet_nakamura",  "member_email": "nakamura@abc.com"},
+    "C0B5XLA6925": {"name": "tweet_yamada",    "member_email": "yamada@abc.com"},
+    "C0B5XLA3AGZ": {"name": "tweet_tanaka",    "member_email": "tanaka@abc.com"},
+    "C0B6Q7YBTR6": {"name": "tweet_kimura",    "member_email": "kimura@abc.com"},
+    "C0B5VUTFHR8": {"name": "tweet_harada",    "member_email": "harada@abc.com"},
+    "C0B5SHGNVNZ": {"name": "tweet_hasegawa",  "member_email": "hasegawa@abc.com"},
+    "C0B5PHWDL5R": {"name": "tweet_okada",     "member_email": "okada@abc.com"},
 }
 
 # プロジェクト・全社チャンネル → slack_channels コンテナに格納
@@ -31,7 +38,17 @@ SLACK_CHANNEL_MAP: dict[str, dict] = {
     "C0B5C36EL02": {
         "name": "proj-llm-agent-infra",
         "kind": "project",
-        "project_id": "366c7942-de09-8092-9a75-e59d205d94d0",
+        "project_id": "366c7942-de09-8092-9a75-e59d205d94d0",  # PJ-A
+    },
+    "C0B6Q4ARV6C": {
+        "name": "proj-ec-recommend",
+        "kind": "project",
+        "project_id": "36ac7942-de09-811f-8814-ca6c340896be",  # PJ-B
+    },
+    "C0B5PE8TMQB": {
+        "name": "proj-medical-imaging-ai",
+        "kind": "project",
+        "project_id": "36ac7942-de09-8176-88d2-de8abcd9251b",  # PJ-C
     },
 }
 

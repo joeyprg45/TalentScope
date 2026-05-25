@@ -3,3 +3,11 @@ __pycache__/
 *.pyc
 .venv/
 venv/
+
+# Next.js frontend
+frontend/node_modules/
+frontend/.next/
+frontend/.env.local
+frontend/out/
+frontend/build/
+frontend/.turbo/

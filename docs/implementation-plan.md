@@ -3,7 +3,7 @@
 > このドキュメントは「唯一の実装計画書」。アイデアが固まるたびに更新する。
 > 破棄したアイデアは消す。最終的に一枚の完成した計画書になる状態を目指す。
 >
-> 最終更新: 2026-05-23
+> 最終更新: 2026-05-25
 
 ---
 
@@ -150,13 +150,14 @@
 
 > 専用のプロジェクトDBは作らない。プロジェクト＝ハブ直下の child_page。詳細は [docs/data-schema.md](data-schema.md)。
 
-### 5.2 Slack チャンネル構造
+### 5.2 Slack チャンネル構造（全13チャンネル）
 
-| 種別 | チャンネル例 | 用途 |
+| 種別 | チャンネル | 用途 |
 |---|---|---|
-| 個人vlog | `#tweet_kobayashi` `#tweet_maeda` `#tweet_sato` | 個人の技術会話・スキル把握 |
-| プロジェクト | `#project-llm-agent` 等 | プロジェクト内コミュニケーション |
-| 全社 | `#all-abctechnologies` | 全社共有 |
+| 個人vlog | `tweet_nakamura` ★ `tweet_tanaka` `tweet_yamada` `tweet_maeda` `tweet_kobayashi` `tweet_sato` | 個人の技術活動・スキル把握（主要6名） |
+| 個人vlog | `tweet_kimura` `tweet_harada` `tweet_hasegawa` `tweet_okada` | 新規AIエンジニア4名の活動記録 |
+| プロジェクト | `proj-llm-agent-infra` `proj-ec-recommend` `proj-medical-imaging-ai` | プロジェクト内コミュニケーション |
+| 全社 | `all-abctechnologies` | 全社共有 |
 
 ### 5.3 Cosmos DB コンテナ構造（蓄積先）
 
@@ -183,24 +184,29 @@
 - [x] Cosmos DB: アカウント作成 → 接続 → CRUD確認
 - [x] Azure OpenAI: 接続 → Chat Completion確認
 
-### ▶ フェーズ2: データ投入 → Ingest層実装
+### ✅ フェーズ2: データ投入 → Ingest層実装（完了）
 1. Notion デモデータ投入
    - [x] スキーマ確定（[docs/data-schema.md](data-schema.md)）
    - [x] `次世代 LLM Agent 基盤開発` ページに新スキーマでデモ投入（`seed_llm_agent_test.py`）
-         — メンバー5 / タスク8（ボードビュー）/ 議事録4 / ページ冒頭の基本情報
-   - [-] 残り2プロジェクトは省略（1プロジェクトのデモデータで進める）
+   - [x] **`seed_demo_full.py` 実行**: 中村大樹追加 + PJ-B（大手EC向けレコメンド）+ PJ-C（医療画像AI）+ PJ-A期間更新
+   - [x] **`seed_pjb_pjc_fix.py` 実行**: PJ-Bに田中誠追加 + PJ-Cスキーマ整備
+   - [x] **`seed_new_members.py` 実行**: 新規AIエンジニア4名をハブメンバーDBに追加（計10名）
+     - プロジェクト構成: PJ-A（4/1〜7/31）/ PJ-B（2/1〜7/25）/ PJ-C（8/1〜 計画中・未アサイン）
+     - デモキー: 中村大樹が画像系Kaggle銀メダル×2 + PJ-B議事録でリーダー適性急成長 → PJ-Cのテックリードに推薦
 2. Slack デモデータ投入
-   - [x] 書き込みスコープ（`chat:write` / `chat:write.customize`）追加・検証済み
-   - [ ] proj-* チャンネル3つ作成（`channels:manage` 無ければ手動）
-   - [ ] `seed_slack_demo.py` 実行（デモ会話55件投入）
+   - [x] 書き込みスコープ（`chat:write` / `chat:write.customize` / `channels:manage`）追加・検証済み
+   - [x] 全チャンネル（13本）作成・デモ投稿完了
+     - tweet系10本（主要6名 + 新規4名）/ proj系3本（PJ-A/B/C）/ 全社1本
+   - [x] **`seed_slack_demo_v2.py` 実行**: tweet_nakamura / tweet_yamada / tweet_tanaka / proj-ec-recommend / proj-medical-imaging-ai 追加投入
+   - [x] **`seed_new_members.py` 実行**: tweet_kimura / tweet_harada / tweet_hasegawa / tweet_okada 作成（各5件）
 3. Cosmos DB セットアップ
    - [x] ~~Cosmos DB ネイティブベクトル検索を採用~~ → **廃止**。meetingsはLLM事前分析+構造化保存に変更
-   - [ ] `python scripts/setup_cosmosdb.py` 実行（slack_channels 追加のみ。meetings のベクトルポリシーは不要）
+   - [x] 4コンテナ作成完了（members / projects / meetings / slack_channels）
 4. Ingest層実装（Notion/Slack → Cosmos DB）
-   - [x] `ingest/slack_ingest.py` — 個人vlog → members.slack_vlog / proj-*/全社ch → slack_channels
-   - [x] `ingest/run_ingest.py` — 全体オーケストレータ
-   - [ ] `ingest/notion_ingest.py` — **要修正**: 議事録をチャンク+埋め込みではなく、全文+LLM要約+member_analyses[]として1ドキュメント保存に変更
-   - [ ] `python -m ingest.run_ingest` 実行（Slackデモデータ投入後）
+   - [x] `ingest/notion_ingest.py` — 議事録を全文+LLM要約+member_analyses[]として1ドキュメント保存
+   - [x] `ingest/slack_ingest.py` — 個人vlog(10名) → members.slack_vlog / proj-*(3本)+全社ch → slack_channels
+   - [x] `ingest/run_ingest.py` — PJ-A/B/C 全プロジェクト対応
+   - [x] `python -m ingest.run_ingest` 実行完了（メンバー10名 / PJ3本 / 議事録9件 / Slack13ch）
 5. エージェント実装（Semantic Kernel）— ✅ **完了**
    - [x] `agents/orchestrator.py` — ChatCompletionAgent + FunctionChoiceBehavior.Auto() (ReAct)
    - [x] `agents/plugins/member_plugin.py` / `project_plugin.py` / `contribution_plugin.py` / `meeting_plugin.py`
@@ -209,12 +215,12 @@
    - [x] `agents/prompts/` — base_chat / skill_analysis / assignment / assignment_growth / assignment_synergy
    - [x] `agents/report.py` — レポートヘッダ/フッタフォーマッタ
 
-### ✅ フェーズ3（進行中）: チャットUI → Azureデプロイ・仕上げ
-- [x] Chat UI: **Chainlit** — 常時チャット対応。自然文インテント検出でスキル分析/アサイン提案を起動
-- [x] 個人スキル分析レポート（サイドパネル + Markdownダウンロード）
+### ▶ フェーズ3（進行中）: チャットUI → Azureデプロイ・仕上げ
+- [x] Chat UI: **Next.js** (`frontend/`) + **FastAPI** (`api/`) 構成
+  - `GET /api/members` / `GET /api/projects` / `GET /api/meetings` / `POST /api/chat` 等
+  - ページ構成: `/` チャット / `/members` メンバー一覧 / `/projects` PJ一覧 / `/assignments` アサイン提案 / `/reports` レポート / `/calendar` カレンダー
+- [x] 個人スキル分析レポート（Markdownダウンロード対応）
 - [x] アサイン提案レポート 4軸（能力/コスト/育成/シナジー）
-- [ ] `ingest/notion_ingest.py` 修正 — 議事録を LLM要約+`member_analyses[]`として保存
-- [ ] Slack デモデータ投入（`seed_slack_demo.py`）
 - [ ] Azure Container Apps デプロイ
 - [ ] Zenn 記事 / 3分デモ動画 / アーキテクチャ図
 - 審査期間 2026/6/2〜6/18 に動作可能な状態を維持
@@ -468,11 +474,11 @@ Cosmos DBへのアクセスはすべて `@kernel_function` で実装し、各エ
 |...
 ```
 
-### Chainlit 実装方針
-- レポート生成中は `cl.Step` でサブタスク進捗を表示（「メンバー情報取得中...」「MTG分析中...」）
-- 完了後に `cl.Text(content=md_text, display="side", name="レポート")` でサイドパネル表示
-- `cl.File(path=tmp_path, name="report.md", display="inline")` でダウンロードボタン追加
-- 「提案軸をコスト重視に変更して」→ 同じサイドパネルを新しい内容で上書き更新
+### フロントエンド実装方針（Next.js + FastAPI）
+- チャット: `POST /api/chat` にメッセージ送信 → FastAPIがエージェントを呼び出しストリーミング返却
+- レポート: `POST /api/reports` でMarkdown生成 → フロントでプレビュー表示 + ダウンロードボタン
+- アサイン提案軸（ability/cost/growth/synergy）はフロントのUIで選択 → APIパラメータとして送信
+- 「提案軸をコスト重視に変更して」→ 同じ会話コンテキスト内で再提案
 
 ---
 
@@ -480,12 +486,13 @@ Cosmos DBへのアクセスはすべて `@kernel_function` で実装し、各エ
 
 | 項目 | 決定 | 備考 |
 |---|---|---|
-| 言語 | Python | |
+| 言語 | Python / TypeScript | バックエンド: Python / フロントエンド: TypeScript |
 | エージェントFW | Semantic Kernel | Microsoft製。審査要件「Microsoft AI技術」を満たす |
 | LLM | Azure OpenAI (gpt-4o) | Semantic Kernel経由で利用 |
 | DB | Azure Cosmos DB | 4コンテナ（members / projects / meetings / slack_channels）。NoSQL |
 | データ入力元 | Notion / Slack | Notionがタスク・メンバー・MTGの主データソース |
-| Chat UI | Chainlit | ボタン切り替えによるモード選択。ストリーミング対応 |
+| バックエンドAPI | FastAPI (`api/`) | uvicorn で起動。`/api/chat` でエージェント呼び出し |
+| フロントエンド | Next.js (`frontend/`) | App Router。/members /projects /assignments /calendar 等 |
 | Azure 実行基盤 | Azure Container Apps | コンテナデプロイ。スケール0対応でコスト効率よし |
 
 ---

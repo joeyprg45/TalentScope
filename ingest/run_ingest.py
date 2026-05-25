@@ -39,9 +39,19 @@ MEMBER_DS_ID = "367c7942-de09-8026-af72-000b072dfb23"
 
 PROJECTS = [
     {
-        "page_id":    "366c7942-de09-8092-9a75-e59d205d94d0",  # 次世代 LLM Agent 基盤開発
+        "page_id":    "366c7942-de09-8092-9a75-e59d205d94d0",  # PJ-A: 次世代 LLM Agent 基盤開発
         "task_ds_id": "367c7942-de09-80f0-a785-000b74ddc0fd",
         "mtg_ds_id":  "367c7942-de09-8037-8cf9-000b49c08892",
+    },
+    {
+        "page_id":    "36ac7942-de09-811f-8814-ca6c340896be",  # PJ-B: 大手EC向けレコメンドエンジン開発
+        "task_ds_id": "36ac7942-de09-81d2-8fe4-000b0eab7a21",
+        "mtg_ds_id":  "36ac7942-de09-81c7-aed1-000b1c607e2b",
+    },
+    {
+        "page_id":    "36ac7942-de09-8176-88d2-de8abcd9251b",  # PJ-C: 医療画像AI診断支援システム（計画中）
+        "task_ds_id": "36ac7942-de09-8000-b2fe-000bc26d30f9",
+        "mtg_ds_id":  "36ac7942-de09-8183-8d69-000b52e47420",
     },
 ]
 
