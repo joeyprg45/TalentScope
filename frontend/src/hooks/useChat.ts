@@ -61,8 +61,10 @@ export function useChat() {
   }, []);
 
   function connect() {
-    const base = process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:8000";
-    const wsBase = base.replace(/^http/, "ws");
+    const base = process.env.NEXT_PUBLIC_API_URL || "";
+    const wsBase = base
+      ? base.replace(/^http/, "ws")
+      : `${window.location.protocol === "https:" ? "wss" : "ws"}://${window.location.host}`;
     const url = `${wsBase}/api/chat/ws?session_id=${sessionIdRef.current}`;
     const ws = new WebSocket(url);
     wsRef.current = ws;
