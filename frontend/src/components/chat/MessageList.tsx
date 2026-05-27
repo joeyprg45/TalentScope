@@ -88,16 +88,16 @@ function MessageBubble({ message }: { message: ChatMessage }) {
 
       <div
         className={cn(
-          "max-w-[75%] rounded-2xl px-3 py-2 text-sm",
+          "rounded-2xl px-3 py-2 text-sm",
           isUser
-            ? "rounded-tr-sm bg-primary text-primary-foreground"
-            : "rounded-tl-sm bg-muted text-foreground",
+            ? "max-w-[75%] rounded-tr-sm bg-primary text-primary-foreground"
+            : "max-w-[92%] rounded-tl-sm bg-muted text-foreground",
         )}
       >
         {isUser ? (
           <p className="whitespace-pre-wrap break-words">{message.content}</p>
         ) : (
-          <div className="prose prose-sm dark:prose-invert max-w-none break-words">
+          <div className="markdown-body">
             <ReactMarkdown remarkPlugins={[remarkGfm]}>
               {message.content}
             </ReactMarkdown>

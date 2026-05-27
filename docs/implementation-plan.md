@@ -3,7 +3,7 @@
 > このドキュメントは「唯一の実装計画書」。アイデアが固まるたびに更新する。
 > 破棄したアイデアは消す。最終的に一枚の完成した計画書になる状態を目指す。
 >
-> 最終更新: 2026-05-25
+> 最終更新: 2026-05-27
 
 ---
 
@@ -165,8 +165,8 @@
 |---|---|---|
 | `members` | `/member_id`（email） | メンバープロフィール＋スキルシート＋**monthly_cost**（Notion＋Slack個人vlog統合） |
 | `projects` | `/project_id` | プロジェクト概要＋`tasks[]`＋**`assignments[]`**（member_id/role/start_date/end_date） |
-| `meetings` | `/meeting_id` | MTG/1on1議事録。全文 + LLM生成の全体要約 + メンバー別能力分析を1ドキュメントに保存 |
-| `slack_channels` | `/channel_id` | プロジェクトch・全社chのメッセージ |
+| `meetings` | `/meeting_id` | MTG/1on1議事録。`full_text`（生テキスト）のみ保存。LLM分析はIngest時には行わず、クエリ時に会話分析SAが読む |
+| `slack_channels` | `/channel_id` | プロジェクトch・全社chのメッセージ。1メッセージ=1ドキュメント。`project_id` / `speaker_id` / `posted_at` でフィルタ可 |
 
 > emailをメンバーの正規キーとして全サービス間の名寄せに使う。
 > 各ドキュメントの詳細スキーマ・Ingestマッピングは **[docs/data-schema.md](data-schema.md)** が唯一の規約。
@@ -221,6 +221,21 @@
   - ページ構成: `/` チャット / `/members` メンバー一覧 / `/projects` PJ一覧 / `/assignments` アサイン提案 / `/reports` レポート / `/calendar` カレンダー
 - [x] 個人スキル分析レポート（Markdownダウンロード対応）
 - [x] アサイン提案レポート 4軸（能力/コスト/育成/シナジー）
+- [ ] **サブエージェント実装**（[docs/sub-agent-design.md](sub-agent-design.md) を規約とする）
+  - [ ] `agents/plugins/slack_plugin.py` — SlackPlugin 新規作成（`get_slack_speaker_counts` / `get_project_slack_messages` / `get_member_slack_messages`）
+  - [ ] `agents/plugins/meeting_plugin.py` — `get_project_meetings` / `get_member_meetings` 追加（full_text 込み）
+  - [ ] `agents/sub_agents/conversation_analysis.py` — 会話分析SA（Slack + 会議）
+  - [ ] `agents/sub_agents/task_analysis.py` — タスク分析SA
+  - [ ] `agents/sub_agents/member_profiler.py` — MemberProfilerAgent
+  - [ ] `agents/sub_agents/team_evaluator.py` — TeamEvaluatorAgent
+  - [ ] `agents/prompts/` — 各SA用プロンプトファイル（conversation_analysis / task_analysis / member_profiler / team_evaluator_assignment / team_evaluator_skill）
+  - [ ] `agents/orchestrator.py` — `invoke_*` 4本を Main Agent のツールとして追加
+  - [ ] `agents/plugins/project_plugin.py` — `find_available_members(date_from, date_to?)` 追加（`projects.assignments[]` の期間照合）
+  - [ ] `agents/plugins/member_plugin.py` — `get_member_schedule(member_id)` 追加（全PJの在籍期間を返す）
+  - [ ] `agents/plugins/meeting_plugin.py` — `get_project_meetings` / `get_member_meetings` に `date_from?` / `limit?` パラメータ追加
+  - [ ] `agents/orchestrator.py` — `ask_user_clarification(question)` 追加（Main Agentのみ）・逆質問ルールをシステムプロンプトに追記
+  - [ ] `agents/plugins/team_balance_plugin.py` — `compare_members` / `find_skill_gaps` 追加
+- [ ] re-ingest 実行（meetings スキーマ変更により `overall_summary` / `member_analyses[]` を削除するため）
 - [ ] Azure Container Apps デプロイ
 - [ ] Zenn 記事 / 3分デモ動画 / アーキテクチャ図
 - 審査期間 2026/6/2〜6/18 に動作可能な状態を維持
@@ -229,69 +244,37 @@
 
 ## 6.5 エージェントアーキテクチャ設計
 
+詳細は **[docs/sub-agent-design.md](sub-agent-design.md)** が設計の唯一の規約。以下はサマリー。
+
 ### 基本方針
-- **マルチエージェント構成**。サブエージェントを事前定義し、Orchestratorが必要に応じて起動する。
-- **Orchestrator**: ReAct（Reasoning + Acting）パターン。コンテキストを収集した上で、**アサイン提案そのものを自身が生成**する（メインタスク）。
-- **サブエージェント**: 個々の分析に特化。DBから取得・分析した結果を構造化して返す役割のみ。
+- **マルチエージェント構成**。すべてのエージェントは `ChatCompletionAgent` + `FunctionChoiceBehavior.Auto()` による **ReAct パターンで統一**。コードでフローを強制しない。
+- **Main Agent（Orchestrator）**: 質問を解釈し、どのSAを呼ぶか決定・結果を統合して回答。Cosmos DBには直接アクセスしない。
+- **サブエージェント（SA）**: 専用ツールセットとプロンプトで分析を実施し、コンパクトな結果をMainに返す。
 
 ### エージェント構成
 
 ```
-Orchestrator (ReAct)
-│  全サブエージェントの出力をコンテキストとして受け取り、
-│  最終的なアサイン提案 / スキルギャップ提示 / チームバランス評価を生成する
-│
-├── [A] ProjectInfoAgent
-│       プロジェクトDBから必要スキル・期間・ステータスを取得・整理
-│       Tool: Cosmos DB (projects)
-│
-├── [B] MemberSkillAgent
-│       メンバー1人のスキルシートを構造化して返す
-│       Tool: Cosmos DB (members)
-│
-├── [C] ContributionAgent
-│       タスクDB集計から貢献度・ベロシティ・得意領域を返す
-│       Tool: Cosmos DB (projects / tasks集計)
-│
-├── [D] MeetingAnalysisAgent
-│       メンバーのMTG参加記録・要約・能力分析を取得して返す
-│       Tool: Cosmos DB (meetings) ← フィルター検索のみ。LLM分析はIngest時に完了済み
-│
-└── [E] TeamBalanceAgent
-        提案チーム構成のスキル偏り・リーダー在籍・経験バランスを評価
-        Tool: なし（Orchestratorの中間出力を入力に取る）
+[Main Agent]
+  持つツール: メンバー/PJ概要 + 4つのSA呼び出し口
+       │
+       ├──► [会話分析SA]
+       │      Slack チャンネルメッセージ + 会議 full_text を横断して分析
+       │      発言傾向 / リーダーシップ / 特定テーマへの貢献
+       │      ※Slackメッセージはデフォルト直近3ヶ月に制限
+       │
+       ├──► [タスク分析SA]
+       │      タスク実績（SP / 完了率 / result_note / description）から
+       │      貢献度・スキル・問題解決力を分析
+       │
+       ├──► [MemberProfilerAgent]
+       │      Slack + 会議 + タスクを横断して1名を深掘り
+       │      300tokens の構造化プロファイルを返す
+       │      トリガー: Mainが特定の人物にフォーカスしたい段階
+       │
+       └──► [TeamEvaluatorAgent]
+              シナジー・バランス・コストをワンショット評価
+              プロンプトは IntentClassifier のモード決定時に切り替え
 ```
-
-### ReAct ループ（アサイン提案の例）
-
-```
-[Thought] プロジェクト要件とメンバー情報が必要
-[Action]  ProjectInfoAgent / MemberSkillAgent×N / ContributionAgent×N を並列実行
-[Observe] 各構造化データを取得
-
-[Thought] リーダー要件があるためMTG分析も取得する
-[Action]  MeetingAnalysisAgent を実行
-[Observe] リーダー適性・性格傾向データを取得
-
-[Thought] コンテキストが揃った → アサイン提案を生成（Orchestrator自身が推論）
-[Thought] チームバランスを確認する
-[Action]  TeamBalanceAgent に提案チームを渡す
-[Observe] バランス評価を取得
-
-[Final Answer] 推薦メンバー・理由・不足スキル・チームバランスコメントを返す
-```
-
-### Semantic Kernel での実装方針
-- サブエージェントは `KernelFunction`（`@kernel_function`）として定義し、Kernelにプラグイン登録
-- OrchestratorはSKの `ChatCompletionAgent` + `FunctionChoiceBehavior.Auto()` でReAct相当の動作を実現
-- MemberSkillAgent / ContributionAgent はメンバーごとに並列呼び出しする
-- MeetingAnalysisAgent のみサブエージェント内でLLM呼び出しあり（自然言語分析が必要なため）。他はDB取得 + 構造化のみ
-
-### ツールの所有原則（重要）
-- **Orchestratorのツールはサブエージェントの呼び出し口のみ**。`search_meetings` 等の低レベルCosmosツールはOrchestratorのKernelに登録しない。
-- Orchestratorは「何を知りたいか」を自然言語でサブエージェントに渡す。「どうやって取るか（クエリ・ベクトル検索等）」はサブエージェントの責務。
-- 例: Orchestratorは `MeetingAnalysisAgent("小林のリーダーシップ言及回数を調べて")` と呼ぶ。`search_meetings()` を直接呼ばない。
-- これによりOrchestratorがCosmosの構造・検索実装を知る必要がなくなり、サブエージェントの差し替えも容易になる。
 
 ### meetings ドキュメント構造（1会議 = 1ドキュメント）
 
@@ -302,30 +285,18 @@ Orchestrator (ReAct)
   "project_id": "...",
   "title": "スプリント計画 #3",
   "date": "2026-05-10",
-  "type": "スプリント計画",
+  "meeting_type": "スプリント計画",
   "participants": ["kobayashi@abc.com", "maeda@abc.com"],
-  "full_text": "（生の議事録テキスト全文）",
-  "overall_summary": "スプリントゴールと設計方針を決定。RAGアーキテクチャの採用が合意された。",
-  "member_analyses": [
-    {
-      "member_id": "kobayashi@abc.com",
-      "member_name": "小林拓海",
-      "proposal_ability": "新しい設計案を2件提案。具体的な実装イメージまで言語化していた",
-      "logical_thinking": "懸念点を先に整理してから議論を進める傾向",
-      "facilitation": "議題の整理役を担うことが多い",
-      "technical_depth": "インフラ・LLM両方に言及。技術的文脈の理解が深い",
-      "personality_notes": "慎重派。リスクを先に挙げることが多い"
-    }
-  ]
+  "full_text": "田中: エージェントのアーキテクチャですが...\n前田: それいいですね..."
 }
 ```
 
-> チャンク分割・ベクトル埋め込みは行わない。Ingest時に `gpt-4o` で `overall_summary` と `member_analyses[]` を生成して保存する。エージェントはフィルター（`project_id` / `participants` contains）で取得するだけでよい。
+> Ingest時の LLM 分析（`overall_summary` / `member_analyses[]`）は廃止。
+> `full_text` のみ保存。分析はクエリ時に会話分析SAが実施する。
 
 ### MCPについての方針
 - **MCPは使わない**。Cosmos DBアクセスはすべて SK KernelFunction（Pythonの関数）として直接実装する。
 - Notion / Slack も Ingest時は直接API呼び出し（MCPサーバーを立てる必要なし）。
-- MCP採用の条件: 外部サービスが公式MCPサーバーを提供していて、かつその採用にメリットがある場合のみ検討。現時点では不要。
 
 ---
 
@@ -333,55 +304,59 @@ Orchestrator (ReAct)
 
 Cosmos DBへのアクセスはすべて `@kernel_function` で実装し、各エージェントのKernelにプラグイン登録する。
 
-### Orchestratorが持つツール
+### Main Agent が持つツール
+
+| ツール | プラグイン | 概要 |
+|---|---|---|
+| `list_all_members()` | MemberPlugin | 全メンバーの概要一覧 |
+| `list_all_projects(status?)` | ProjectPlugin | 全プロジェクト一覧 |
+| `get_project_detail(project_id)` | ProjectPlugin | PJ基本情報 |
+| `find_members_by_skill(skill)` | MemberPlugin | スキルでメンバー検索 |
+| `find_available_members(date_from, date_to?)` | ProjectPlugin | 期間内に稼働アサインがないメンバーをDB集計で返す。**アサイン提案モードの第一ステップとして必ず呼ぶ** |
+| `ask_user_clarification(question)` | — | 不明点・前提が欠けている場合にユーザーへ逆質問する。**Main Agentのみ**。SAには付与しない |
+| `invoke_conversation_agent(project_id_or_member_id, question, date_from?, date_to?)` | — | 会話分析SA に委譲 |
+| `invoke_task_agent(project_id_or_member_id, question)` | — | タスク分析SA に委譲 |
+| `invoke_member_profiler(member_id, project_context)` | — | MemberProfilerAgent に委譲 |
+| `invoke_team_evaluator(member_ids, project_id)` | — | TeamEvaluatorAgent に委譲 |
+
+### 会話分析SA が持つツール（SlackPlugin + MeetingPlugin）
 
 | ツール | 概要 |
 |---|---|
-| `list_all_members()` | 全メンバーの概要一覧を返す。誰を分析するか判断するために使う |
-| `list_all_projects(status?)` | 全プロジェクト一覧（必要スキル・ステータス含む） |
+| `get_slack_speaker_counts(project_id, date_from?, date_to?)` | 発言回数を SQL 集計で返す（定量専用。LLM不要）|
+| `get_project_slack_messages(project_id, date_from?, date_to?, speaker_id?)` | Slack メッセージを `"氏名: 発言\n..."` 形式で返す（定性分析用）。デフォルト直近3ヶ月 |
+| `get_member_slack_messages(member_id, project_id?)` | 特定メンバーの Slack 発言履歴 |
+| `get_project_meetings(project_id, date_from?, limit?)` | 会議の full_text 込み一覧。limit未指定時は直近10件 |
+| `get_member_meetings(member_id, limit?)` | 特定メンバーが参加した会議の full_text。limit未指定時は直近10件 |
 
-### [A] ProjectInfoAgent のツール
-
-| ツール | 概要 |
-|---|---|
-| `get_project_detail(project_id)` | 必要スキル / 期間 / assignments[] / 概要を返す |
-| `list_all_projects(status?)` | 全プロジェクト一覧（Orchestratorと共有） |
-
-### [B] MemberSkillAgent のツール
+### タスク分析SA が持つツール（ContributionPlugin）
 
 | ツール | 概要 |
 |---|---|
-| `list_all_members()` | 全メンバーの概要一覧（Orchestratorと共有） |
-| `get_member_detail(member_id)` | スキル詳細 / 役職 / monthly_cost / Slack要約を返す |
-| `find_members_by_skill(skill_name)` | 特定スキルを持つメンバーを絞り込む |
-| `get_member_schedule(member_id)` | 全PJの在籍期間（start_date〜end_date）を返す。空き期間確認に使う |
+| `get_project_tasks(project_id)` | タスク全件（name / assignee / SP / skills_used / result_note / description） |
+| `get_member_task_stats(member_id)` | メンバー別 SP 合計 / 完了率 / スキル / task_descriptions |
 
-### [C] ContributionAgent のツール
+### MemberProfilerAgent が持つツール
 
 | ツール | 概要 |
 |---|---|
-| `get_member_task_stats(member_id)` | プロジェクト別貢献度 / SP合計 / 完了率 / 得意タスク傾向 |
-| `get_project_tasks(project_id)` | タスク一覧 + 担当者 + 実行結果・学び |
-| `calc_project_cost(member_ids, project_id)` | 提案チームの月次コスト合計 × PJ期間 = 総コスト試算 |
+| `get_member_detail(member_id)` | 基本情報 + Slack vlog（最新5件） |
+| `get_member_schedule(member_id)` | 全PJの在籍期間（project_name / role / start_date / end_date） |
+| `get_member_meetings(member_id, limit?)` | 参加会議の full_text。limit未指定時は直近10件 |
+| `get_member_task_stats(member_id)` | タスク貢献（SP / 完了率 / スキル） |
 
-### [D] MeetingAnalysisAgent のツール
-
-| ツール | 概要 |
-|---|---|
-| `get_member_meeting_analyses(member_id)` | そのメンバーが参加した全MTGの `member_analyses` エントリを集約して返す。施策提案力・論理思考・性格傾向などの構造化データ |
-| `get_project_meeting_summaries(project_id)` | プロジェクトの全MTG要約一覧（`overall_summary`）を返す |
-
-### [E] TeamBalanceAgent のツール
-
-なし。Orchestratorが生成した「提案チーム構成」をテキストで受け取り、LLMが推論して返す。
-
-### [F] SynergyPlugin のツール（チームワーク重視モードで使用）
+### TeamEvaluatorAgent が持つツール（SynergyPlugin + TeamBalancePlugin）
 
 | ツール | 概要 |
 |---|---|
-| `get_collaboration_matrix(member_ids_json)` | 指定メンバーの全ペアについて、過去の共同PJ数・会議参加数・シナジースコア（PJ×2+会議）を集計して返す。Cosmos DBから決定論的に算出（LLM推論なし） |
+| `get_collaboration_matrix(member_ids_json)` | 共同PJ数・会議参加数・シナジースコア（`PJ×2+会議`）を集計 |
+| `evaluate_team_balance(team_json)` | 役割・スキル・シニア/ジュニア比率のバランス評価 |
+| `calc_project_cost(member_ids, project_id)` | 月次コスト × 期間 = 総コスト試算 |
+| `find_skill_gaps(project_id)` | PJ必要スキルと提案チームの保有スキルを照合し、不足を検出 |
+| `compare_members(member_ids, aspect)` | 指定メンバーのスキル・タスク貢献を横並び比較（役割適性検証に使用） |
 
-> シナジースコア式: `shared_projects × 2 + shared_meetings`（PJは会議より長期の関係のため2倍重み）
+> TeamEvaluatorAgent はアサイン提案ドラフト完成後に **1回だけ** 呼ばれるレビュアー。
+> コスト・バランス・スキルカバレッジ・シナジーを検証し、問題点 or 承認を返す。
 
 ---
 

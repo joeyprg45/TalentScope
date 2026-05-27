@@ -82,7 +82,12 @@
       "Bash(xargs grep -l \"cosmos\\\\|CosmosDB\\\\|Database\")",
       "Bash(xargs grep -l \"report\")",
       "Bash(Get-ChildItem -Path \"c:\\\\Users\\\\jok\\\\Desktop\\\\Microsoft_hackathon\\\\TalentScope\\\\api\" -Recurse -File)",
-      "Bash(Select-Object FullName)"
+      "Bash(Select-Object FullName)",
+      "PowerShell(Get-ChildItem -Path \"c:\\\\Users\\\\jok\\\\Desktop\\\\Microsoft_hackathon\\\\TalentScope\\\\api\" -Name -Recurse | Where-Object { $_ -match \"\\(main\\\\.py|app\\\\.py\\)$\" })",
+      "Bash(Get-ChildItem -Path \"c:\\\\Users\\\\jok\\\\Desktop\\\\Microsoft_hackathon\\\\TalentScope\" -Directory)",
+      "Bash(Select-Object -ExpandProperty Name)",
+      "Bash(python -c \"import ast,sys; [ast.parse\\(open\\(f,encoding='utf-8'\\).read\\(\\), f\\) for f in ['agents/orchestrator.py','agents/plugins/slack_plugin.py','agents/plugins/meeting_plugin.py','agents/plugins/project_plugin.py','agents/plugins/team_balance_plugin.py','agents/plugins/sub_agent_plugin.py','agents/plugins/clarification_plugin.py','agents/sub_agents/__init__.py','agents/sub_agents/conversation_analysis.py','agents/sub_agents/task_analysis.py','agents/sub_agents/member_profiler.py','agents/sub_agents/team_evaluator.py','api/routers/chat.py']]; print\\('AST OK'\\)\")",
+      "Bash(python -c \"from agents.tool_filter import ToolCallCallback, _tool_callback_var, _tool_filter; from agents.sub_agents.member_profiler import MemberProfilerAgent; from agents.sub_agents.conversation_analysis import ConversationAnalysisAgent; from agents.sub_agents.task_analysis import TaskAnalysisAgent; from agents.sub_agents.team_evaluator import TeamEvaluatorAgent; print\\('OK'\\)\")"
     ],
     "additionalDirectories": [
       "c:\\Users\\jok\\.claude\\plans"

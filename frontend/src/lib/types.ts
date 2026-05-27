@@ -47,6 +47,7 @@ export type ChatMessage = {
 };
 
 export type ToolCallStatus = "running" | "done";
+export type ToolCallKind = "tool" | "subagent";
 
 export type ToolCallItem = {
   id: string;
@@ -54,6 +55,20 @@ export type ToolCallItem = {
   displayName: string;
   status: ToolCallStatus;
   args?: Record<string, string>;
+  kind?: ToolCallKind; // 省略時は "tool"
+  children?: ToolCallItem[]; // サブエージェント内部のツール呼び出し
+};
+
+export type ClarificationOption = {
+  id: string;
+  label: string;
+  description?: string;
+};
+
+export type ClarificationPrompt = {
+  id: string;
+  question: string;
+  options: ClarificationOption[];
 };
 
 export type ChatStatus =
@@ -70,10 +85,25 @@ export type ReportData = {
   updatedAt: Date;
 };
 
+export type ChatEntry = { role: "user" | "assistant"; content: string };
+
+export type ChatSessionItem = {
+  id: string;
+  title: string;
+  createdAt: string;
+  updatedAt: string;
+};
+
+export type TraceEntry = Record<string, unknown>;
+
 export type SavedReport = {
   id: string;
   type: "assignment" | "skill";
   title: string;
   markdown: string;
-  createdAt: string; // ISO 8601
+  createdAt: string;       // ISO 8601
+  axis?: string | null;
+  member_id?: string | null;
+  project_id?: string | null;
+  chat_history?: ChatEntry[];
 };

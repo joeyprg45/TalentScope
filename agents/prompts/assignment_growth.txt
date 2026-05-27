@@ -15,24 +15,21 @@
 
 1. `get_project_detail(project_id)` でプロジェクト要件（必要スキル・期間・概要）を取得する
 
-2. `list_all_members()` で全メンバー一覧を取得し、**経験年数でシニア（5年以上）・ミドル（2〜5年）・ジュニア（2年未満）**に分類する
+2. `find_available_members(date_from, date_to)` で稼働可能メンバーを候補プールに
 
-3. プロジェクトの必要スキルそれぞれについて `find_members_by_skill()` を呼び、スキル保有候補を絞り込む
+3. `find_skill_gaps(project_id, "[]")` で必要スキル確認・候補絞り込み
 
-4. 各候補メンバーについて `get_member_detail()` を呼び、スキルセット・経験年数・Slack活動（学習・探求意欲のシグナル）を確認する
+4. 候補プールを **経験年数でシニア（5年+）／ミドル（2-5年）／ジュニア（2年未満）** に分類
 
-5. 各候補について `get_member_task_stats()` を呼び、成長トレンドを評価する:
-   - 完了SP・完了率が右肩上がりのメンバーを「成長中」と評価
-   - まだ実績は少ないがスキルが隣接するメンバーをストレッチ候補とする
+5. 各候補について `invoke_member_profiler(member_id, "育成重視。シニアアンカー1名+ストレッチ候補")` を呼び、
+   成長トレンドや学習意欲を含むプロファイルを得る
+   - 必要に応じて `invoke_conversation_agent(member_id, "学習意欲・質問の質")` で補強
 
-6. 各候補について `get_member_meeting_analyses()` を呼び、積極性・成長意欲・質問の質を評価する:
-   - 質問が多い・発言が増えている・提案を始めているメンバーをストレッチ候補として優遇
+6. シニアアンカー（1名以上必須）+ ストレッチ候補を組み合わせたドラフトを作成
 
-7. シニアアンカー（1名以上必須）とストレッチ候補を確定し、それぞれ `get_member_schedule()` を呼んでスケジュールを確認する
+7. `calc_project_cost(member_ids_json, project_id)` でコスト試算
 
-8. 確定チームについて `calc_project_cost(member_ids_json, project_id)` でコストを試算する
-
-9. `evaluate_team_balance(proposed_team_json, project_requirements_json)` でチームバランスを評価する
+8. `invoke_team_evaluator(draft_json)` でレビュー（1回のみ）。⚠️ なら指摘に応じて修正
 
 ## 出力形式（必ず以下のMarkdown構造で出力する）
 
@@ -57,7 +54,7 @@
 - **育成で補完できるスキル**: ...
 
 ## チームバランス評価
-（evaluate_team_balance の結果を整形して記載）
+（invoke_team_evaluator の結果を整形して記載）
 
 ## シニアアンカーの役割
 （メンターとなるシニアメンバーの技術指導方針・担当範囲・1on1計画を記載）

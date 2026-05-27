@@ -9,8 +9,9 @@ from semantic_kernel.contents.chat_history import ChatHistory
 @dataclass
 class SessionData:
     history: ChatHistory = field(default_factory=ChatHistory)
-    current_report: str | None = None  # 最新のアサイン提案レポート Markdown
-    current_axis: str = "ability"      # 最後のアサイン提案で使った提案軸
+    current_report: str | None = None     # 最新のアサイン提案レポート Markdown
+    current_report_id: str | None = None  # CosmosDB の reports コンテナ ID
+    current_axis: str = "ability"         # 最後のアサイン提案で使った提案軸
 
 
 _sessions: dict[str, SessionData] = {}

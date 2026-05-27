@@ -4,12 +4,11 @@
   ingest_members(notion, cosmos_members, member_ds_id) -> name_email_map
   ingest_project(notion, cosmos_projects, page_id, task_ds_id, name_email_map)
   ingest_meetings(notion, cosmos_meetings, mtg_ds_id, project_page_id,
-                  name_email_map, openai_client)
+                  name_email_map)
 
 Notion の取り込みは必ず members → projects → meetings の順で実行する。
 （氏名→emailマップが後続の前提になるため）
 """
-import json
 import re
 from datetime import datetime, timezone
 from typing import Any
@@ -83,6 +82,35 @@ def list_blocks(notion, page_id: str) -> list[dict]:
     return results
 
 
+def _extract_blocks_text(blocks: list[dict]) -> str:
+    """Notionブロック一覧をMarkdown文字列に変換する。"""
+    lines = []
+    for block in blocks:
+        btype = block.get("type", "")
+        content = block.get(btype, {})
+        rich_texts = content.get("rich_text", [])
+        text = _join_rich_text(rich_texts).strip()
+        if not text:
+            if btype == "divider":
+                lines.append("---")
+            continue
+        if btype in ("heading_1", "heading_2", "heading_3"):
+            prefix = "#" * int(btype[-1])
+            lines.append(f"{prefix} {text}")
+        elif btype == "bulleted_list_item":
+            lines.append(f"- {text}")
+        elif btype == "numbered_list_item":
+            lines.append(f"1. {text}")
+        elif btype == "quote":
+            lines.append(f"> {text}")
+        elif btype == "code":
+            lang = content.get("language", "")
+            lines.append(f"```{lang}\n{text}\n```")
+        else:
+            lines.append(text)
+    return "\n".join(lines)
+
+
 def get_page_title(page: dict) -> str:
     """ページオブジェクトからタイトルを取得する（プロパティ名不問）。"""
     for _key, prop in page.get("properties", {}).items():
@@ -148,76 +176,6 @@ def _parse_period(s: str) -> dict:
             return {"start": parts[0].strip(), "end": parts[1].strip()}
     return {"start": s.strip(), "end": None}
 
-
-# ================================================================
-# 議事録 LLM 分析
-# ================================================================
-
-_ANALYSIS_SYSTEM = """\
-あなたは会議の議事録を分析する人事分析AIです。
-与えられた議事録から、参加者ごとの能力・性格傾向と会議全体の要約を抽出します。
-必ず指定のJSON形式のみで回答してください。
-"""
-
-_ANALYSIS_USER_TMPL = """\
-## 会議情報
-タイトル: {title}
-種別: {mtg_type}
-参加者: {participants}
-
-## 議事録本文
-{body}
-
-## 出力形式（JSONのみ）
-{{
-  "overall_summary": "会議全体の要約（2〜3文。決定事項・主な議論を含める）",
-  "member_analyses": [
-    {{
-      "member_name": "氏名（参加者リストに含まれる名前のみ）",
-      "proposal_ability": "施策・アイデアの提案力（発言が確認できた内容を具体的に）",
-      "logical_thinking": "論理的思考力・議論の組み立て方の観察",
-      "facilitation": "まとめ・ファシリテーション・議論整理の観察",
-      "technical_depth": "技術的な深さ・専門性の観察",
-      "personality_notes": "性格傾向・コミュニケーションスタイルの観察"
-    }}
-  ]
-}}
-
-注意: 発言が確認できたメンバーのみ member_analyses に含めること。発言なしは省略。
-"""
-
-
-def _analyze_meeting(
-    openai_client,
-    chat_deployment: str,
-    title: str,
-    mtg_type: str,
-    participant_names: list[str],
-    body: str,
-) -> dict:
-    """LLMで議事録を分析し、overall_summary と member_analyses[] を返す。"""
-    user_msg = _ANALYSIS_USER_TMPL.format(
-        title=title,
-        mtg_type=mtg_type,
-        participants="、".join(participant_names) if participant_names else "（不明）",
-        body=body if body.strip() else "（本文なし）",
-    )
-
-    resp = openai_client.chat.completions.create(
-        model=chat_deployment,
-        messages=[
-            {"role": "system", "content": _ANALYSIS_SYSTEM},
-            {"role": "user",   "content": user_msg},
-        ],
-        response_format={"type": "json_object"},
-        temperature=0.2,
-    )
-
-    raw = resp.choices[0].message.content or "{}"
-    try:
-        return json.loads(raw)
-    except json.JSONDecodeError:
-        return {"overall_summary": raw, "member_analyses": []}
 
 
 # ================================================================
@@ -306,6 +264,9 @@ def ingest_project(
         if assignee_email:
             member_ids.add(assignee_email)
 
+        body_blocks = list_blocks(notion, task["id"])
+        description = _extract_blocks_text(body_blocks)
+
         task_doc = {
             "task_id": task["id"],
             "name": get_title(props, "タスク名"),
@@ -314,11 +275,13 @@ def ingest_project(
             "story_points": props.get("ストーリーポイント", {}).get("number") or 0,
             "skills_used": split_skills(get_rich_text(props, "使用スキル")),
             "result_note": get_rich_text(props, "実行結果・学び"),
+            "description": description,
         }
         if not assignee_email:
             print(f"  WARN: 担当者 '{assignee_name}' のemail が未解決 (task: {task_doc['name'][:30]})")
         task_docs.append(task_doc)
-        print(f"  task: [{task_doc['status']}] {task_doc['name'][:40]} / {assignee_name}")
+        has_desc = "📄" if description else "  "
+        print(f"  task: [{task_doc['status']}] {task_doc['name'][:40]} / {assignee_name} {has_desc}")
 
     project_doc = {
         "id": project_page_id,
@@ -344,14 +307,8 @@ def ingest_meetings(
     mtg_ds_id: str,
     project_page_id: str,
     name_email_map: dict[str, str],
-    openai_client,
-    chat_deployment: str,
 ) -> None:
-    """議事録DB を meetings コンテナに取り込む。
-
-    1会議 = 1ドキュメント。全文 + LLM生成の overall_summary + member_analyses[] を保存する。
-    チャンク分割・ベクトル埋め込みは行わない。
-    """
+    """議事録DB を meetings コンテナに取り込む。1会議 = 1ドキュメント。"""
     print("\n--- [3/3] 議事録取り込み ---")
     meetings = query_all(notion, mtg_ds_id)
 
@@ -372,17 +329,6 @@ def ingest_meetings(
             name_email_map.get(name, name) for name in participant_names
         ]
 
-        print(f"  [{mtg_type}] {title} → LLM分析中...")
-        analysis = _analyze_meeting(
-            openai_client, chat_deployment,
-            title, mtg_type, participant_names, body,
-        )
-
-        # member_analyses に member_id を付加
-        for entry in analysis.get("member_analyses", []):
-            name = entry.get("member_name", "")
-            entry["member_id"] = name_email_map.get(name, name)
-
         doc = {
             "id": meeting_id,
             "meeting_id": meeting_id,
@@ -394,12 +340,9 @@ def ingest_meetings(
             "participants": participant_ids,
             "participant_names": participant_names,
             "full_text": body,
-            "overall_summary": analysis.get("overall_summary", ""),
-            "member_analyses": analysis.get("member_analyses", []),
             "source": {"notion_page_id": meeting_id, "synced_at": now_iso()},
         }
         cosmos_meetings.upsert_item(doc)
-        n = len(analysis.get("member_analyses", []))
-        print(f"  OK: {title} / member_analyses {n} 名分")
+        print(f"  OK: {title}")
 
     print(f"OK: 議事録 {len(meetings)} 件を取り込み")

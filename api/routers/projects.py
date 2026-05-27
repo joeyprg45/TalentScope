@@ -7,11 +7,21 @@ from api.schemas.projects import Project, ProjectDetail
 
 router = APIRouter()
 
+_STATUS_MAP = {
+    "進行中": "active",
+    "計画中": "planning",
+    "完了": "completed",
+    "完了済み": "completed",
+}
+
 
 @router.get("", response_model=list[Project])
 def list_projects(status: str | None = None, cosmos=Depends(get_cosmos)) -> list[dict]:
     query = "SELECT c.project_id, c.name, c.status, c.period, c.assignments, c.required_skills FROM c WHERE c.type = 'project'"
     items = list(cosmos.projects.query_items(query=query, enable_cross_partition_query=True))
+    for item in items:
+        if item.get("status") in _STATUS_MAP:
+            item["status"] = _STATUS_MAP[item["status"]]
     if status:
         items = [p for p in items if p.get("status") == status]
     return items

@@ -5,7 +5,7 @@ Notion / Slack のデータを Cosmos DB に取り込む。
 実行順序（deps あり）:
   1. Notion → members     （氏名→emailマップを構築）
   2. Notion → projects    （タスクネスト）
-  3. Notion → meetings    （全文 + LLM要約 + member_analyses[]）
+  3. Notion → meetings    （全文そのまま保存）
   4. Slack  → members.slack_vlog
   5. Slack  → slack_channels
 
@@ -25,7 +25,6 @@ if hasattr(sys.stdout, "reconfigure"):
 from dotenv import load_dotenv
 from notion_client import Client as NotionClient
 from slack_sdk import WebClient as SlackClient
-from openai import AzureOpenAI
 from azure.cosmos import CosmosClient
 
 from ingest.notion_ingest import ingest_members, ingest_project, ingest_meetings
@@ -64,16 +63,11 @@ def main() -> int:
     conn_str   = os.getenv("COSMOS_CONNECTION_STRING")
     notion_tk  = os.getenv("NOTION_API_KEY")
     slack_tk   = os.getenv("SLACK_BOT_OAUTH_TOKEN")
-    aoai_key   = os.getenv("AZURE_OPENAI_API_KEY")
-    aoai_ep    = os.getenv("AZURE_OPENAI_ENDPOINT")
-    chat_dep   = os.getenv("AZURE_OPENAI_CHAT_DEPLOYMENT_NAME", "gpt-4o")
 
     missing = [k for k, v in {
         "COSMOS_CONNECTION_STRING":  conn_str,
         "NOTION_API_KEY":            notion_tk,
         "SLACK_BOT_OAUTH_TOKEN":     slack_tk,
-        "AZURE_OPENAI_API_KEY":      aoai_key,
-        "AZURE_OPENAI_ENDPOINT":     aoai_ep,
     }.items() if not v]
     if missing:
         for k in missing:
@@ -90,15 +84,9 @@ def main() -> int:
 
     notion = NotionClient(auth=notion_tk)
     slack  = SlackClient(token=slack_tk)
-    openai = AzureOpenAI(
-        api_key=aoai_key,
-        azure_endpoint=aoai_ep,
-        api_version="2024-12-01-preview",
-    )
 
     print("=" * 55)
     print("TalentScope Ingest 開始")
-    print(f"  chat deployment: {chat_dep}")
     print("=" * 55)
 
     # 1. メンバー（氏名→emailマップを構築）
@@ -114,7 +102,7 @@ def main() -> int:
         ingest_meetings(
             notion, c_meetings,
             proj["mtg_ds_id"], proj["page_id"],
-            name_email_map, openai, chat_dep,
+            name_email_map,
         )
 
     # 4. Slack vlog → members 更新

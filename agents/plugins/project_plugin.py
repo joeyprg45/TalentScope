@@ -2,17 +2,40 @@
 from __future__ import annotations
 
 import json
+from datetime import date
 from typing import Annotated
 
 from azure.cosmos import ContainerProxy
 from semantic_kernel.functions import kernel_function
 
 
+def _parse_date(s: str) -> date | None:
+    try:
+        return date.fromisoformat((s or "").strip()) if s else None
+    except ValueError:
+        return None
+
+
+def _ranges_overlap(a_start: date | None, a_end: date | None,
+                    b_start: date | None, b_end: date | None) -> bool:
+    """[a_start, a_end] と [b_start, b_end] が重なるか。端不明は最大限重なる想定で扱う。"""
+    if a_start and b_end and a_start > b_end:
+        return False
+    if a_end and b_start and a_end < b_start:
+        return False
+    return True
+
+
 class ProjectPlugin:
     """プロジェクトDBからプロジェクト情報を取得する."""
 
-    def __init__(self, projects_container: ContainerProxy) -> None:
+    def __init__(
+        self,
+        projects_container: ContainerProxy,
+        members_container: ContainerProxy | None = None,
+    ) -> None:
         self._projects = projects_container
+        self._members = members_container
 
     @kernel_function(description="全プロジェクト一覧（名前/ステータス/必要スキル/期間）を返す")
     def list_all_projects(
@@ -77,3 +100,79 @@ class ProjectPlugin:
         if not matched:
             return json.dumps({"error": f"プロジェクト名 '{name}' に一致するプロジェクトが見つかりません"}, ensure_ascii=False)
         return json.dumps(matched, ensure_ascii=False)
+
+    @kernel_function(
+        description=(
+            "指定期間に稼働アサインがないメンバー一覧を返す。"
+            "アサイン提案モードで最初に呼び、候補プールを得るためのツール"
+        )
+    )
+    def find_available_members(
+        self,
+        date_from: Annotated[str, "対象期間の開始日 ISO形式（例: 2026-08-01）"],
+        date_to: Annotated[str, "対象期間の終了日 ISO形式。空文字なら開始日のみで判定"] = "",
+    ) -> str:
+        target_start = _parse_date(date_from)
+        target_end = _parse_date(date_to) or target_start
+        if not target_start:
+            return json.dumps(
+                {"error": "date_from を ISO日付（YYYY-MM-DD）で指定してください"},
+                ensure_ascii=False,
+            )
+
+        all_projects = list(
+            self._projects.query_items(
+                query=(
+                    "SELECT c.project_id, c.name, c.status, c.assignments, c.period "
+                    "FROM c"
+                ),
+                enable_cross_partition_query=True,
+            )
+        )
+
+        busy_members: dict[str, list[dict]] = {}
+        for proj in all_projects:
+            for a in proj.get("assignments", []) or []:
+                mid = a.get("member_id")
+                if not mid:
+                    continue
+                a_start = _parse_date(a.get("start_date", "") or a.get("start", ""))
+                a_end = _parse_date(a.get("end_date", "") or a.get("end", ""))
+                if _ranges_overlap(target_start, target_end, a_start, a_end):
+                    busy_members.setdefault(mid, []).append({
+                        "project_id":   proj["project_id"],
+                        "project_name": proj.get("name", ""),
+                        "role":         a.get("role"),
+                        "start":        a.get("start_date") or a.get("start"),
+                        "end":          a.get("end_date")   or a.get("end"),
+                    })
+
+        if self._members is None:
+            return json.dumps(
+                {"error": "members container が未注入のため候補抽出ができません"},
+                ensure_ascii=False,
+            )
+        all_members = list(
+            self._members.query_items(
+                query=(
+                    "SELECT c.member_id, c.name, c.role, c.skills, "
+                    "c.years_experience, c.monthly_cost "
+                    "FROM c"
+                ),
+                enable_cross_partition_query=True,
+            )
+        )
+        available = [m for m in all_members if m["member_id"] not in busy_members]
+        return json.dumps(
+            {
+                "date_from": date_from,
+                "date_to":   date_to or date_from,
+                "available_count": len(available),
+                "available_members": available,
+                "busy_members": [
+                    {"member_id": mid, "assignments": busy_members[mid]}
+                    for mid in busy_members
+                ],
+            },
+            ensure_ascii=False,
+        )

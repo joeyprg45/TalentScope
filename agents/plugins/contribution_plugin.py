@@ -57,16 +57,22 @@ class ContributionPlugin:
             result_notes = [
                 t.get("result_note", "") for t in member_tasks if t.get("result_note")
             ]
+            task_descriptions = [
+                {"name": t.get("name", ""), "description": t["description"][:500]}
+                for t in member_tasks
+                if t.get("description")
+            ]
             stats.append({
-                "project_id":      proj["project_id"],
-                "project_name":    proj["name"],
-                "period":          proj.get("period", {}),
-                "task_count":      len(member_tasks),
-                "total_sp":        total_sp,
-                "done_sp":         done_sp,
-                "completion_rate": round(done_sp / total_sp, 2) if total_sp else 0,
-                "skills_used":     list(dict.fromkeys(skills_used)),  # 重複除去・順序保持
-                "result_notes":    result_notes,
+                "project_id":        proj["project_id"],
+                "project_name":      proj["name"],
+                "period":            proj.get("period", {}),
+                "task_count":        len(member_tasks),
+                "total_sp":          total_sp,
+                "done_sp":           done_sp,
+                "completion_rate":   round(done_sp / total_sp, 2) if total_sp else 0,
+                "skills_used":       list(dict.fromkeys(skills_used)),  # 重複除去・順序保持
+                "result_notes":      result_notes,
+                "task_descriptions": task_descriptions,
             })
         return json.dumps(stats, ensure_ascii=False)
 

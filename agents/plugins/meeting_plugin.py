@@ -76,3 +76,65 @@ class MeetingPlugin:
             )
         )
         return json.dumps(meetings, ensure_ascii=False)
+
+    @kernel_function(
+        description=(
+            "プロジェクトの議事録 full_text を直近順に最大 limit 件返す（会話分析用）。"
+            "limit 未指定時は10件、date_from で期間下限を指定可能"
+        )
+    )
+    def get_project_meetings(
+        self,
+        project_id: Annotated[str, "プロジェクトID"],
+        date_from: Annotated[str, "期間下限 ISO日付。空文字なら制限なし"] = "",
+        limit: Annotated[int, "取得件数上限（デフォルト10）"] = 10,
+    ) -> str:
+        if not limit or limit <= 0:
+            limit = 10
+        clauses = ["c.project_id = @pid"]
+        params: list[dict] = [{"name": "@pid", "value": project_id}]
+        if date_from.strip():
+            clauses.append("c.date >= @df")
+            params.append({"name": "@df", "value": date_from.strip()})
+        query = (
+            "SELECT TOP @lim c.meeting_id, c.title, c.date, c.meeting_type, c.full_text "
+            "FROM c WHERE " + " AND ".join(clauses) + " ORDER BY c.date DESC"
+        )
+        params.append({"name": "@lim", "value": limit})
+        meetings = list(
+            self._meetings.query_items(
+                query=query, parameters=params, enable_cross_partition_query=True,
+            )
+        )
+        return json.dumps(meetings, ensure_ascii=False)
+
+    @kernel_function(
+        description=(
+            "メンバーが参加した議事録 full_text を直近順に最大 limit 件返す（会話分析用）。"
+            "limit 未指定時は10件"
+        )
+    )
+    def get_member_meetings(
+        self,
+        member_id: Annotated[str, "メンバーのemail"],
+        limit: Annotated[int, "取得件数上限（デフォルト10）"] = 10,
+    ) -> str:
+        if not limit or limit <= 0:
+            limit = 10
+        query = (
+            "SELECT TOP @lim c.meeting_id, c.title, c.date, c.meeting_type, "
+            "c.project_id, c.full_text "
+            "FROM c WHERE ARRAY_CONTAINS(c.participants, @mid) "
+            "ORDER BY c.date DESC"
+        )
+        meetings = list(
+            self._meetings.query_items(
+                query=query,
+                parameters=[
+                    {"name": "@mid", "value": member_id},
+                    {"name": "@lim", "value": limit},
+                ],
+                enable_cross_partition_query=True,
+            )
+        )
+        return json.dumps(meetings, ensure_ascii=False)
