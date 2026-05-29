@@ -47,7 +47,7 @@ export type ChatMessage = {
 };
 
 export type ToolCallStatus = "running" | "done";
-export type ToolCallKind = "tool" | "subagent";
+export type ToolCallKind = "tool" | "subagent" | "plan";
 
 export type ToolCallItem = {
   id: string;
@@ -55,8 +55,9 @@ export type ToolCallItem = {
   displayName: string;
   status: ToolCallStatus;
   args?: Record<string, string>;
-  kind?: ToolCallKind; // 省略時は "tool"
-  children?: ToolCallItem[]; // サブエージェント内部のツール呼び出し
+  kind?: ToolCallKind;
+  planText?: string;
+  children?: ToolCallItem[];
 };
 
 export type ClarificationOption = {

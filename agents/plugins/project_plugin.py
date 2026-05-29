@@ -8,6 +8,8 @@ from typing import Annotated
 from azure.cosmos import ContainerProxy
 from semantic_kernel.functions import kernel_function
 
+from agents.plugins._resolve import resolve_project_id
+
 
 def _parse_date(s: str) -> date | None:
     try:
@@ -71,8 +73,9 @@ class ProjectPlugin:
     )
     def get_project_detail(
         self,
-        project_id: Annotated[str, "プロジェクトID（Notion page ID）"],
+        project_id: Annotated[str, "プロジェクト名またはID（例: EC推薦エンジン）"],
     ) -> str:
+        project_id = resolve_project_id(project_id, self._projects)
         doc = self._projects.read_item(item=project_id, partition_key=project_id)
         doc.pop("source", None)
         return json.dumps(doc, ensure_ascii=False)

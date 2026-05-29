@@ -29,6 +29,7 @@ export function useChat() {
   const wsRef = useRef<WebSocket | null>(null);
   const reconnectCountRef = useRef(0);
   const reportAccRef = useRef<string>("");
+  const planAccRef = useRef<string>("");
   const toolCallLogRef = useRef<ToolCallItem[]>([]);
   const currentReportIdRef = useRef<string | null>(null);
   const currentReportMarkdownRef = useRef<string>("");
@@ -46,6 +47,8 @@ export function useChat() {
   const [pendingAssignmentContent, setPendingAssignmentContent] = useState<string | null>(null);
   const [pendingClarification, setPendingClarification] = useState<ClarificationPrompt | null>(null);
   const [toolCallLog, setToolCallLog] = useState<ToolCallItem[]>([]);
+  const [currentPlanText, setCurrentPlanText] = useState<string>("");
+  const [isPlanStreaming, setIsPlanStreaming] = useState<boolean>(false);
   const [activeReportId, setActiveReportId] = useState<string | null>(null);
   const [activeReportTitle, setActiveReportTitle] = useState<string | null>(null);
   const [lastSavedReportId, setLastSavedReportId] = useState<string | null>(null);
@@ -162,6 +165,24 @@ export function useChat() {
             question: data.question as string,
             options: (data.options as ClarificationPrompt["options"]) ?? [],
           });
+        } else if (data.type === "plan_chunk") {
+          planAccRef.current += data.text as string;
+          setIsPlanStreaming(true);
+        } else if (data.type === "plan_done") {
+          const planText = planAccRef.current;
+          if (planText) {
+            const planItem: ToolCallItem = {
+              id: crypto.randomUUID(),
+              toolName: "plan",
+              displayName: "分析プラン",
+              status: "done",
+              kind: "plan",
+              planText,
+            };
+            toolCallLogRef.current = [planItem, ...toolCallLogRef.current];
+            setToolCallLog([...toolCallLogRef.current]);
+          }
+          setIsPlanStreaming(false);
         } else if (data.type === "chunk") {
           setMessages((prev) => {
             const last = prev.at(-1);
@@ -175,8 +196,11 @@ export function useChat() {
         } else if (data.type === "done") {
           const frozenLog = [...toolCallLogRef.current];
           toolCallLogRef.current = [];
+          planAccRef.current = "";
           currentSubagentIdRef.current = null;
           setToolCallLog([]);
+          setCurrentPlanText("");
+          setIsPlanStreaming(false);
           setStatus("connected");
           const pr = data.pending_report as string | undefined;
           if (pr === "assignment") {
@@ -325,6 +349,9 @@ export function useChat() {
     (content: string) => {
       const ws = wsRef.current;
       if (!ws || ws.readyState !== WebSocket.OPEN || status === "streaming") return;
+      planAccRef.current = "";
+      setCurrentPlanText("");
+      setIsPlanStreaming(false);
       setMessages((prev) => [
         ...prev,
         { id: crypto.randomUUID(), role: "user", content },
@@ -448,6 +475,7 @@ export function useChat() {
     pendingAssignmentContent, confirmAxisAndSend, cancelAssignmentPrompt,
     pendingClarification, submitClarification,
     toolCallLog,
+    currentPlanText, isPlanStreaming,
     activeReportId, activeReportTitle, setActiveReport, clearActiveReport,
     lastSavedReportId, lastReportDiff,
     newChat, loadChat,

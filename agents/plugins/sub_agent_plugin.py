@@ -8,8 +8,10 @@ from __future__ import annotations
 from contextvars import ContextVar
 from typing import Annotated, Awaitable, Callable
 
+from azure.cosmos import ContainerProxy
 from semantic_kernel.functions import kernel_function
 
+from agents.plugins._resolve import resolve_project_id
 from agents.sub_agents import (
     ConversationAnalysisAgent,
     MemberProfilerAgent,
@@ -49,11 +51,19 @@ class SubAgentPlugin:
         task: TaskAnalysisAgent,
         profiler: MemberProfilerAgent,
         evaluator: TeamEvaluatorAgent,
+        projects_container: ContainerProxy | None = None,
     ) -> None:
         self._conv = conversation
         self._task = task
         self._profiler = profiler
         self._evaluator = evaluator
+        self._projects = projects_container
+
+    def _resolve(self, name_or_id: str) -> str:
+        """プロジェクト名またはUUIDをUUIDに解決する。projects_container未注入時は元の値を返す。"""
+        if not name_or_id or not self._projects:
+            return name_or_id or ""
+        return resolve_project_id(name_or_id, self._projects)
 
     @kernel_function(
         description=(
@@ -65,14 +75,22 @@ class SubAgentPlugin:
         self,
         target_id: Annotated[str, "project_id または member_id"],
         question: Annotated[str, "分析の観点・質問文"],
+        project_id: Annotated[str, "絞り込むプロジェクト名またはID（不明な場合は空文字を渡す）"] = "",
         date_from: Annotated[str, "期間下限 ISO日付（任意）"] = "",
         date_to: Annotated[str, "期間上限 ISO日付（任意）"] = "",
     ) -> str:
+        project_id = self._resolve(project_id)
         args = {"target_id": target_id, "question": question[:120]}
-        if date_from: args["date_from"] = date_from
-        if date_to:   args["date_to"]   = date_to
+        if project_id: args["project_id"] = project_id
+        if date_from:  args["date_from"]  = date_from
+        if date_to:    args["date_to"]    = date_to
         await _emit("invoke_conversation_agent", "start", args)
-        result = await self._conv.run(target_id, question, date_from or None, date_to or None)
+        result = await self._conv.run(
+            target_id, question,
+            date_from=date_from or None,
+            date_to=date_to or None,
+            project_id=project_id or None,
+        )
         await _emit("invoke_conversation_agent", "done", args, result)
         return result
 
@@ -86,10 +104,22 @@ class SubAgentPlugin:
         self,
         target_id: Annotated[str, "project_id または member_id"],
         question: Annotated[str, "分析の観点・質問文"],
+        project_id: Annotated[str, "絞り込むプロジェクト名またはID（不明な場合は空文字を渡す）"] = "",
+        date_from: Annotated[str, "期間下限 ISO日付（任意）"] = "",
+        date_to: Annotated[str, "期間上限 ISO日付（任意）"] = "",
     ) -> str:
+        project_id = self._resolve(project_id)
         args = {"target_id": target_id, "question": question[:120]}
+        if project_id: args["project_id"] = project_id
+        if date_from:  args["date_from"]  = date_from
+        if date_to:    args["date_to"]    = date_to
         await _emit("invoke_task_agent", "start", args)
-        result = await self._task.run(target_id, question)
+        result = await self._task.run(
+            target_id, question,
+            project_id=project_id or None,
+            date_from=date_from or None,
+            date_to=date_to or None,
+        )
         await _emit("invoke_task_agent", "done", args, result)
         return result
 
@@ -101,13 +131,26 @@ class SubAgentPlugin:
     )
     async def invoke_member_profiler(
         self,
-        member_id: Annotated[str, "メンバーのemail"],
+        member_id: Annotated[str, "メンバーの名前またはemail（例: 中村 大樹）"],
         project_context: Annotated[str, "プロジェクト要件などの文脈（任意）"] = "",
+        project_id: Annotated[str, "絞り込むプロジェクト名またはID（不明な場合は空文字を渡す）"] = "",
+        date_from: Annotated[str, "期間下限 ISO日付（任意）"] = "",
+        date_to: Annotated[str, "期間上限 ISO日付（任意）"] = "",
     ) -> str:
+        project_id = self._resolve(project_id)
         args = {"member_id": member_id}
         if project_context: args["project_context"] = project_context[:120]
+        if project_id:      args["project_id"]      = project_id
+        if date_from:       args["date_from"]        = date_from
+        if date_to:         args["date_to"]          = date_to
         await _emit("invoke_member_profiler", "start", args)
-        result = await self._profiler.run(member_id, project_context)
+        result = await self._profiler.run(
+            member_id,
+            project_context=project_context,
+            project_id=project_id or None,
+            date_from=date_from or None,
+            date_to=date_to or None,
+        )
         await _emit("invoke_member_profiler", "done", args, result)
         return result
 

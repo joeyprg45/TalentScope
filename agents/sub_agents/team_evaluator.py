@@ -12,7 +12,8 @@ import pathlib
 from semantic_kernel import Kernel
 from semantic_kernel.agents import ChatCompletionAgent
 from semantic_kernel.connectors.ai.function_choice_behavior import FunctionChoiceBehavior
-from semantic_kernel.connectors.ai.open_ai import AzureChatCompletion
+from semantic_kernel.connectors.ai.open_ai import AzureChatCompletion, AzureChatPromptExecutionSettings
+from semantic_kernel.functions.kernel_arguments import KernelArguments
 from semantic_kernel.contents.chat_history import ChatHistory
 from semantic_kernel.filters.filter_types import FilterTypes
 
@@ -58,6 +59,9 @@ class TeamEvaluatorAgent:
             instructions=instructions,
             function_choice_behavior=FunctionChoiceBehavior.Auto(),
         )
+        self._invoke_args = KernelArguments(
+            settings=AzureChatPromptExecutionSettings(parallel_tool_calls=False)
+        )
 
     async def run(self, draft_json: str) -> str:
         """draft_json は {project_id, period:{start,end}, proposed_team:[{member_id,role},...]}。"""
@@ -73,7 +77,7 @@ class TeamEvaluatorAgent:
             f"```json\n{pretty}\n```"
         )
         body = ""
-        async for resp in self._agent.invoke(messages=history):
+        async for resp in self._agent.invoke(messages=history, arguments=self._invoke_args):
             text = str(resp.message) if resp.message else ""
             if text:
                 body += text

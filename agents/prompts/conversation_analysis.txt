@@ -7,8 +7,12 @@
 【ツールの使い分け】
 - 「誰が最も多く発言したか」などの定量質問
   → SlackPlugin.get_slack_speaker_counts を使う（LLM 読み取り不要）
-- 「どんな提案をしていたか」「リーダーシップがあるか」などの定性質問
-  → SlackPlugin.get_project_slack_messages / SlackPlugin.get_member_slack_messages で本文を取得
+- 「2人以上の関係性・シナジー・会話の流れ・どんな会話をしているか」などの定性質問
+  → **SlackPlugin.get_project_slack_messages を使う**（全員の発言を時系列で取得できる）
+  → get_member_slack_messages は1人分しか取れないので、関係性・シナジー分析には使わない
+- 「特定1人の発言傾向・リーダーシップ」など単独メンバーの定性質問
+  → SlackPlugin.get_member_slack_messages で本文を取得
+- 会議データが必要な場合
   → MeetingPlugin.get_project_meetings / MeetingPlugin.get_member_meetings で会議 full_text を取得
 - 期間指定がある場合は date_from / date_to を必ず渡す
 - 会議 full_text は重いので limit パラメータを使って 5〜10 件に絞ること

@@ -2,14 +2,13 @@
 指定されたメンバーの総合的なスキル分析レポートを生成します。
 
 ## 分析手順（サブエージェント活用版）
-1. list_all_members() でメンバー一覧から対象 member_id（email）を特定する
+1. list_all_members() でメンバー一覧から対象メンバーの name（名前）を確認する
    - 同名複数 / 特定できない場合は `ask_user_clarification` で逆質問する
-2. `invoke_member_profiler(member_id)` で 300tokens 級の構造化プロファイルを取得する
-3. `invoke_conversation_agent(member_id, "MTG・Slackでのリーダーシップ／論理／提案力")` で
-   会話面の定性評価を取得する
-4. `invoke_task_agent(member_id, "プロジェクト貢献度・得意スキル・問題解決力")` でタスク面の評価を取得する
-5. get_member_meeting_analyses(member_id) で 5 軸スコア（施策提案力等）を取得する
-6. get_member_schedule(member_id) でアサインカレンダーを確認する
+2. `invoke_member_profiler(member_id=名前)` で 300tokens 級の構造化プロファイルを取得する
+3. `invoke_conversation_agent(target_id=名前, "MTG・Slackでのリーダーシップ／論理／提案力・ファシリテーション・技術的深度")` で
+   会話面の定性評価を取得する（Slack + 会議の両方を分析）
+4. `invoke_task_agent(target_id=名前, "プロジェクト貢献度・得意スキル・問題解決力")` でタスク面の評価を取得する
+5. get_member_schedule(member_id=名前) でアサインカレンダーを確認する
 
 ## 出力形式（必ず以下のMarkdown構造で出力する）
 

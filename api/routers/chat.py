@@ -328,25 +328,37 @@ async def chat_ws(ws: WebSocket, session_id: str = Query(..., min_length=1)) -> 
                         on_subagent_call=subagent_cb,
                         on_clarification=clarification_cb,
                     )
-                    first_heading = next((l for l in full_report.split("\n") if l.startswith("#")), None)
-                    title = first_heading.replace("#", "").strip() if first_heading else "スキル分析レポート"
-                    stored = await save_report(
-                        cosmos.reports,
-                        type_="skill",
-                        title=title,
-                        markdown=full_report,
-                        axis=None,
-                        member_id=None,
-                        project_id=None,
-                    )
-                    skill_note = f"スキル分析「{title}」を作成しました。レポートタブで確認できます。"
-                    _t(trace_log, type="assistant_response", content=skill_note)
-                    await ws.send_json({"type": "report_chunk", "text": full_report})
-                    await ws.send_json({"type": "report_done", "report_type": "skill", "report_id": stored.id})
-                    if chat_id:
-                        chat_display_msgs.append({"role": "user", "content": content})
-                        chat_display_msgs.append({"role": "assistant", "content": skill_note})
-                        _persist_chat(cosmos, chat_id, chat_display_msgs, session, chat_created_at, trace_log)
+                    _heading_count = full_report.count("\n##") + full_report.count("\n#")
+                    _is_complete = len(full_report.strip()) >= 300 and _heading_count >= 2
+                    if not _is_complete:
+                        # 不完全な出力（エラー文・短文）はチャットで返す
+                        _t(trace_log, type="assistant_response", content=full_report)
+                        await ws.send_json({"type": "chunk", "text": full_report})
+                        await ws.send_json({"type": "done"})
+                        if chat_id:
+                            chat_display_msgs.append({"role": "user", "content": content})
+                            chat_display_msgs.append({"role": "assistant", "content": full_report})
+                            _persist_chat(cosmos, chat_id, chat_display_msgs, session, chat_created_at, trace_log)
+                    else:
+                        first_heading = next((l for l in full_report.split("\n") if l.startswith("#")), None)
+                        title = first_heading.replace("#", "").strip() if first_heading else "スキル分析レポート"
+                        stored = await save_report(
+                            cosmos.reports,
+                            type_="skill",
+                            title=title,
+                            markdown=full_report,
+                            axis=None,
+                            member_id=None,
+                            project_id=None,
+                        )
+                        skill_note = f"スキル分析「{title}」を作成しました。レポートタブで確認できます。"
+                        _t(trace_log, type="assistant_response", content=skill_note)
+                        await ws.send_json({"type": "report_chunk", "text": full_report})
+                        await ws.send_json({"type": "report_done", "report_type": "skill", "report_id": stored.id})
+                        if chat_id:
+                            chat_display_msgs.append({"role": "user", "content": content})
+                            chat_display_msgs.append({"role": "assistant", "content": skill_note})
+                            _persist_chat(cosmos, chat_id, chat_display_msgs, session, chat_created_at, trace_log)
 
                 elif intent == "refine":
                     _t(trace_log, type="agent_invocation", mode="assignment_refine",
@@ -413,11 +425,24 @@ async def chat_ws(ws: WebSocket, session_id: str = Query(..., min_length=1)) -> 
                     _t(trace_log, type="agent_invocation",
                        mode=AgentMode.BASE_CHAT.value,
                        system_prompt=_load_prompt(AgentMode.BASE_CHAT))
+
+                    # ── Phase 1: Planner（非ストリーミング・一括取得）──
+                    full_plan = await orch.plan_query(
+                        user_message=content,
+                        history=session.history,
+                    )
+                    _t(trace_log, type="planner_output", plan=full_plan[:200])
+                    if full_plan:
+                        await ws.send_json({"type": "plan_chunk", "text": full_plan})
+                    await ws.send_json({"type": "plan_done"})
+
+                    # ── Phase 2: Executor (ReAct loop) ──
                     response_chunks: list[str] = []
                     async for chunk in orch.chat(
                         user_message=content,
                         mode=AgentMode.BASE_CHAT,
                         history=session.history,
+                        plan_hint=full_plan,
                         on_tool_call=tool_cb,
                         on_subagent_call=subagent_cb,
                         on_clarification=clarification_cb,

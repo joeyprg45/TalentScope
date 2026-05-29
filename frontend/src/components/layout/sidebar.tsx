@@ -4,7 +4,6 @@ import Link from "next/link";
 import { usePathname } from "next/navigation";
 import {
   Briefcase,
-  Calendar,
   FileText,
   Home,
   Users,
@@ -16,7 +15,6 @@ const NAV = [
   { href: "/", label: "ホーム", icon: Home },
   { href: "/members", label: "メンバー", icon: Users },
   { href: "/projects", label: "プロジェクト", icon: Briefcase },
-  { href: "/calendar", label: "カレンダー", icon: Calendar },
   { href: "/reports", label: "レポート", icon: FileText },
 ];
 

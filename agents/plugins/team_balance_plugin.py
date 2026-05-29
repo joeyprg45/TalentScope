@@ -13,6 +13,7 @@ from openai import AzureOpenAI
 from semantic_kernel.functions import kernel_function
 
 from agents.config import AgentSettings
+from agents.plugins._resolve import resolve_project_id
 
 _SYSTEM_PROMPT = """\
 あなたはチーム構成の評価専門AIです。
@@ -85,7 +86,7 @@ class TeamBalancePlugin:
     )
     def find_skill_gaps(
         self,
-        project_id: Annotated[str, "プロジェクトID"],
+        project_id: Annotated[str, "プロジェクト名またはID"],
         proposed_member_ids_json: Annotated[
             str,
             'メンバーIDのJSON配列。例: ["a@x.com","b@x.com"]。空配列なら現在のアサインを使う',
@@ -94,6 +95,7 @@ class TeamBalancePlugin:
         if self._projects is None or self._members is None:
             return json.dumps({"error": "containers が未注入"}, ensure_ascii=False)
 
+        project_id = resolve_project_id(project_id, self._projects)
         project = self._projects.read_item(item=project_id, partition_key=project_id)
         required = list(project.get("required_skills", []) or [])
 

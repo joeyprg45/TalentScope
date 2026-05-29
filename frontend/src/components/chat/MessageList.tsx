@@ -3,7 +3,6 @@
 import { Fragment, useEffect, useRef } from "react";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
-
 import { Avatar, AvatarFallback } from "@/components/ui/avatar";
 import { cn } from "@/lib/utils";
 import type { ChatMessage, ChatStatus, ToolCallItem } from "@/lib/types";
@@ -23,7 +22,7 @@ export function MessageList({ messages, status, toolCallLog = [] }: Props) {
     if (listRef.current) {
       listRef.current.scrollTop = listRef.current.scrollHeight;
     }
-  }, [messages, status]);
+  }, [messages, status, toolCallLog]);
 
   const showTyping =
     status === "streaming" &&
@@ -45,15 +44,21 @@ export function MessageList({ messages, status, toolCallLog = [] }: Props) {
         )}
 
         {messages.map((msg) => {
-          if (msg.isStreaming && !msg.content) return null;
+          // ストリーミング中・content なし → ToolCallLog をその位置に表示
+          if (msg.isStreaming && !msg.content) {
+            if (toolCallLog.length > 0) return <ToolCallLog key={msg.id} items={toolCallLog} />;
+            return null;
+          }
 
+          // frozen tool-log-only（アサイン/スキルレポート用）
           if (!msg.content && !msg.isStreaming && msg.toolLog && msg.toolLog.length > 0) {
             return <ToolCallLog key={msg.id} items={msg.toolLog} frozen />;
           }
 
           return (
             <Fragment key={msg.id}>
-              {msg.toolLog && msg.toolLog.length > 0 && (
+              {msg.isStreaming && toolCallLog.length > 0 && <ToolCallLog items={toolCallLog} />}
+              {!msg.isStreaming && msg.toolLog && msg.toolLog.length > 0 && (
                 <ToolCallLog items={msg.toolLog} frozen />
               )}
               <MessageBubble message={msg} />
@@ -61,7 +66,6 @@ export function MessageList({ messages, status, toolCallLog = [] }: Props) {
           );
         })}
 
-        {toolCallLog.length > 0 && <ToolCallLog items={toolCallLog} />}
         {showTyping && toolCallLog.length === 0 && <TypingIndicator />}
       </div>
     </div>

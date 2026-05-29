@@ -9,6 +9,9 @@ from typing import Annotated
 from azure.cosmos import ContainerProxy
 from semantic_kernel.functions import kernel_function
 
+from agents.plugins._resolve import resolve_project_id
+from agents.plugins._resolve_member import resolve_member_id
+
 
 class ContributionPlugin:
     """タスク集計と月次コスト試算を担当する."""
@@ -24,16 +27,23 @@ class ContributionPlugin:
     @kernel_function(description="メンバーのプロジェクト別タスク貢献度（SP合計/完了率/得意スキル）を返す")
     def get_member_task_stats(
         self,
-        member_id: Annotated[str, "メンバーのemail"],
+        member_id: Annotated[str, "メンバーの名前またはemail（例: 中村 大樹）"],
+        project_id: Annotated[str, "絞り込むプロジェクトID（空文字なら全PJ）"] = "",
     ) -> str:
+        member_id = resolve_member_id(member_id, self._members)
+        clauses = ["ARRAY_CONTAINS(c.member_ids, @mid)"]
+        params: list[dict] = [{"name": "@mid", "value": member_id}]
+        if project_id.strip():
+            clauses.append("c.project_id = @pid")
+            params.append({"name": "@pid", "value": project_id.strip()})
         query = (
             "SELECT c.project_id, c.name, c.period, c.tasks "
-            "FROM c WHERE ARRAY_CONTAINS(c.member_ids, @mid)"
+            "FROM c WHERE " + " AND ".join(clauses)
         )
         projects = list(
             self._projects.query_items(
                 query=query,
-                parameters=[{"name": "@mid", "value": member_id}],
+                parameters=params,
                 enable_cross_partition_query=True,
             )
         )
@@ -79,8 +89,9 @@ class ContributionPlugin:
     @kernel_function(description="プロジェクトのタスク一覧（担当者/ステータス/SP/実行結果）を返す")
     def get_project_tasks(
         self,
-        project_id: Annotated[str, "プロジェクトID"],
+        project_id: Annotated[str, "プロジェクト名またはID"],
     ) -> str:
+        project_id = resolve_project_id(project_id, self._projects)
         doc = self._projects.read_item(item=project_id, partition_key=project_id)
         return json.dumps(
             {"project_name": doc.get("name"), "tasks": doc.get("tasks", [])},
@@ -96,10 +107,11 @@ class ContributionPlugin:
             str,
             'メンバーIDのJSON配列 例: ["kobayashi@abc.com", "maeda@abc.com"]',
         ],
-        project_id: Annotated[str, "プロジェクトID"],
+        project_id: Annotated[str, "プロジェクト名またはID"],
     ) -> str:
         member_ids: list[str] = json.loads(member_ids_json)
 
+        project_id = resolve_project_id(project_id, self._projects)
         project = self._projects.read_item(item=project_id, partition_key=project_id)
         period = project.get("period", {})
         start_str = period.get("start", "")

@@ -14,6 +14,8 @@ from typing import Annotated
 from azure.cosmos import ContainerProxy
 from semantic_kernel.functions import kernel_function
 
+from agents.plugins._resolve_member import resolve_member_id
+
 _DEFAULT_LOOKBACK_DAYS = 90
 
 
@@ -31,8 +33,18 @@ def _normalize_date(value: str, *, fallback: str | None = None) -> str | None:
 class SlackPlugin:
     """slack_channels コンテナへのアクセスを提供する."""
 
-    def __init__(self, slack_channels_container: ContainerProxy) -> None:
+    def __init__(
+        self,
+        slack_channels_container: ContainerProxy,
+        members_container: ContainerProxy | None = None,
+    ) -> None:
         self._slack = slack_channels_container
+        self._members = members_container
+
+    def _resolve_member(self, name_or_email: str) -> str:
+        if not name_or_email or not self._members:
+            return name_or_email or ""
+        return resolve_member_id(name_or_email, self._members)
 
     @kernel_function(
         description=(
@@ -83,11 +95,13 @@ class SlackPlugin:
         project_id: Annotated[str, "プロジェクトID"],
         date_from: Annotated[str, "期間下限 ISO日付。空文字なら直近3ヶ月"] = "",
         date_to: Annotated[str, "期間上限 ISO日付。空文字なら現在"] = "",
-        speaker_id: Annotated[str, "特定発言者のemailで絞り込み（空文字なら全員）"] = "",
+        speaker_id: Annotated[str, "特定発言者の名前またはemailで絞り込み（空文字なら全員）"] = "",
     ) -> str:
         df = _normalize_date(date_from, fallback=_default_date_from())
         dt = _normalize_date(date_to)
         sp = _normalize_date(speaker_id)
+        if sp:
+            sp = self._resolve_member(sp)
 
         clauses = ["c.project_id = @pid", "c.type = 'slack_message'"]
         params: list[dict] = [{"name": "@pid", "value": project_id}]
@@ -124,17 +138,18 @@ class SlackPlugin:
     )
     def get_member_slack_messages(
         self,
-        member_id: Annotated[str, "メンバーのemail（speaker_id と一致）"],
+        member_id: Annotated[str, "メンバーの名前またはemail（例: 中村 大樹）"],
         project_id: Annotated[str, "プロジェクトIDで絞り込み（空文字なら全PJ横断）"] = "",
         date_from: Annotated[str, "期間下限 ISO日付。空文字なら直近3ヶ月"] = "",
         date_to: Annotated[str, "期間上限 ISO日付。空文字なら現在"] = "",
     ) -> str:
+        email = self._resolve_member(member_id)
         df = _normalize_date(date_from, fallback=_default_date_from())
         dt = _normalize_date(date_to)
         pid = _normalize_date(project_id)
 
         clauses = ["c.speaker_id = @mid", "c.type = 'slack_message'"]
-        params: list[dict] = [{"name": "@mid", "value": member_id}]
+        params: list[dict] = [{"name": "@mid", "value": email}]
         if pid:
             clauses.append("c.project_id = @pid")
             params.append({"name": "@pid", "value": pid})

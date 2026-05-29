@@ -12,7 +12,12 @@ from typing import AsyncGenerator
 from semantic_kernel import Kernel
 from semantic_kernel.agents import ChatCompletionAgent
 from semantic_kernel.connectors.ai.function_choice_behavior import FunctionChoiceBehavior
-from semantic_kernel.connectors.ai.open_ai import AzureChatCompletion
+from semantic_kernel.connectors.ai.open_ai import AzureChatCompletion, AzureChatPromptExecutionSettings
+from semantic_kernel.functions.kernel_arguments import KernelArguments
+
+_INVOKE_ARGS = KernelArguments(
+    settings=AzureChatPromptExecutionSettings(parallel_tool_calls=False)
+)
 from semantic_kernel.contents.chat_history import ChatHistory
 from semantic_kernel.contents import ChatMessageContent, AuthorRole
 from semantic_kernel.filters.filter_types import FilterTypes
@@ -127,7 +132,7 @@ class TalentScopeOrchestrator:
             plugin_name="ContributionPlugin",
         )
         kernel.add_plugin(
-            MeetingPlugin(containers.meetings),
+            MeetingPlugin(containers.meetings, containers.projects, containers.members),
             plugin_name="MeetingPlugin",
         )
         kernel.add_plugin(
@@ -135,7 +140,7 @@ class TalentScopeOrchestrator:
             plugin_name="TeamBalancePlugin",
         )
         kernel.add_plugin(
-            SynergyPlugin(containers.projects, containers.meetings),
+            SynergyPlugin(containers.projects, containers.meetings, containers.members),
             plugin_name="SynergyPlugin",
         )
 
@@ -145,7 +150,7 @@ class TalentScopeOrchestrator:
         profiler_sa = MemberProfilerAgent(settings, containers)
         evaluator_sa = TeamEvaluatorAgent(settings, containers)
         kernel.add_plugin(
-            SubAgentPlugin(conversation_sa, task_sa, profiler_sa, evaluator_sa),
+            SubAgentPlugin(conversation_sa, task_sa, profiler_sa, evaluator_sa, containers.projects),
             plugin_name="SubAgentPlugin",
         )
         kernel.add_plugin(ClarificationPlugin(), plugin_name="ClarificationPlugin")
@@ -192,12 +197,43 @@ class TalentScopeOrchestrator:
             return "refine"
         return "chat"
 
+    async def plan_query(
+        self,
+        user_message: str,
+        history: ChatHistory | None = None,
+    ) -> str:
+        """質問をサブクエスチョンに分解した実行プランを返す."""
+        from openai import AsyncAzureOpenAI
+        client = AsyncAzureOpenAI(
+            api_key=self._settings.azure_openai_api_key,
+            azure_endpoint=self._settings.azure_openai_endpoint,
+            api_version=self._settings.azure_openai_api_version,
+        )
+        planner_prompt = (_PROMPTS_DIR / "base_chat_planner.txt").read_text(encoding="utf-8")
+        messages: list[dict] = [{"role": "system", "content": planner_prompt}]
+        if history:
+            for msg in list(history.messages)[-4:]:
+                role = msg.role.value if hasattr(msg.role, "value") else str(msg.role)
+                content = str(msg.content) if msg.content else ""
+                if content.strip():
+                    messages.append({"role": role, "content": content})
+        messages.append({"role": "user", "content": user_message})
+
+        response = await client.chat.completions.create(
+            model=self._settings.azure_openai_chat_deployment,
+            messages=messages,
+            temperature=0.1,
+            max_tokens=400,
+        )
+        return (response.choices[0].message.content or "").strip()
+
     async def chat(
         self,
         user_message: str,
         mode: AgentMode = AgentMode.BASE_CHAT,
         history: ChatHistory | None = None,
         axis: str = "ability",
+        plan_hint: str | None = None,
         on_tool_call: ToolCallCallback | None = None,
         on_subagent_call: SubAgentCallback | None = None,
         on_clarification: ClarificationCallback | None = None,
@@ -207,6 +243,18 @@ class TalentScopeOrchestrator:
             history = ChatHistory()
         history.add_user_message(user_message)
 
+        # plan_hint がある場合は実行用に拡張したメッセージを別 history で渡す
+        if plan_hint:
+            exec_history = ChatHistory()
+            for msg in list(history.messages[:-1]):
+                exec_history.add_message(msg)
+            exec_history.add_user_message(
+                f"{user_message}\n\n---\n"
+                f"[以下のプランに従い、各ステップのデータを実際に取得してから回答すること]\n\n{plan_hint}"
+            )
+        else:
+            exec_history = history
+
         agent = self._build_agent(mode, axis)
         full_response: list[str] = []
 
@@ -214,11 +262,13 @@ class TalentScopeOrchestrator:
         sub_token = set_subagent_callback(on_subagent_call) if on_subagent_call is not None else None
         clr_token = set_clarification_callback(on_clarification) if on_clarification is not None else None
         try:
-            async for chunk in agent.invoke_stream(messages=history):
-                text = str(chunk.message) if chunk.message else ""
+            async for response in agent.invoke(messages=exec_history, arguments=_INVOKE_ARGS):
+                text = str(response.message) if response.message else ""
                 if text:
                     full_response.append(text)
-                    yield text
+            combined = "".join(full_response)
+            if combined:
+                yield combined
         finally:
             if tool_token is not None:
                 _tool_callback_var.reset(tool_token)
@@ -227,7 +277,7 @@ class TalentScopeOrchestrator:
             if clr_token is not None:
                 reset_clarification_callback(clr_token)
 
-        # 会話履歴にアシスタントの返答を追加
+        # 会話履歴にアシスタントの返答を追加（元の history に保存）
         history.add_message(
             ChatMessageContent(role=AuthorRole.ASSISTANT, content="".join(full_response))
         )
@@ -255,7 +305,7 @@ class TalentScopeOrchestrator:
         sub_token = set_subagent_callback(on_subagent_call) if on_subagent_call is not None else None
         clr_token = set_clarification_callback(on_clarification) if on_clarification is not None else None
         try:
-            async for response in agent.invoke(messages=history):
+            async for response in agent.invoke(messages=history, arguments=_INVOKE_ARGS):
                 text = str(response.message) if response.message else ""
                 if text:
                     full_response += text
@@ -317,7 +367,7 @@ class TalentScopeOrchestrator:
         try:
             # invoke_stream はツール呼び出しが多いと最終テキストが空になるため
             # レポート生成は invoke() （非ストリーミング）を使用する
-            async for response in agent.invoke(messages=history):
+            async for response in agent.invoke(messages=history, arguments=_INVOKE_ARGS):
                 text = str(response.message) if response.message else ""
                 if text:
                     agent_body += text
@@ -390,7 +440,7 @@ class TalentScopeOrchestrator:
         sub_token = set_subagent_callback(on_subagent_call) if on_subagent_call is not None else None
         clr_token = set_clarification_callback(on_clarification) if on_clarification is not None else None
         try:
-            async for response in agent.invoke(messages=history):
+            async for response in agent.invoke(messages=history, arguments=_INVOKE_ARGS):
                 text = str(response.message) if response.message else ""
                 if text:
                     agent_body += text

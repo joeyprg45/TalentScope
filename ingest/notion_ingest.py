@@ -246,10 +246,10 @@ def ingest_project(
         if member_id == raw["name"]:
             print(f"  WARN: メンバー '{raw['name']}' のemail が未解決")
         assignments.append({
-            "member_id":  member_id,
-            "role":       raw["role"],
-            "start_date": raw["start_date"],
-            "end_date":   raw["end_date"],
+            "member_id": member_id,
+            "role":      raw["role"],
+            "start":     raw["start_date"],
+            "end":       raw["end_date"],
         })
         print(f"  assign: {raw['name']} ({raw['role']}) {raw['start_date']}〜{raw['end_date']}")
 

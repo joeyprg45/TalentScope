@@ -1,6 +1,8 @@
 "use client";
 
-import { useEffect, useRef } from "react";
+import React, { useEffect, useRef } from "react";
+import ReactMarkdown from "react-markdown";
+import remarkGfm from "remark-gfm";
 import { Avatar, AvatarFallback } from "@/components/ui/avatar";
 import type { ToolCallItem } from "@/lib/types";
 
@@ -8,6 +10,29 @@ type Props = {
   items: ToolCallItem[];
   frozen?: boolean;
 };
+
+const planMdComponents = {
+  h1: ({ children }: { children?: React.ReactNode }) => <span className="block font-semibold">{children}</span>,
+  h2: ({ children }: { children?: React.ReactNode }) => <span className="block font-semibold">{children}</span>,
+  h3: ({ children }: { children?: React.ReactNode }) => <span className="block font-medium">{children}</span>,
+  p:  ({ children }: { children?: React.ReactNode }) => <span className="block">{children}</span>,
+  ul: ({ children }: { children?: React.ReactNode }) => <ul className="list-disc pl-3">{children}</ul>,
+  ol: ({ children }: { children?: React.ReactNode }) => <ol className="list-decimal pl-3">{children}</ol>,
+  li: ({ children }: { children?: React.ReactNode }) => <li>{children}</li>,
+};
+
+function PlanItem({ item }: { item: ToolCallItem }) {
+  return (
+    <li className="mb-1.5 pb-1.5 border-b border-border/30">
+      <p className="mb-0.5 text-[10px] font-semibold uppercase tracking-wide text-muted-foreground">
+        分析プラン
+      </p>
+      <div className="text-[11px] text-foreground/80 leading-relaxed">
+        <ReactMarkdown remarkPlugins={[remarkGfm]} components={planMdComponents}>{item.planText ?? ""}</ReactMarkdown>
+      </div>
+    </li>
+  );
+}
 
 function ToolItem({ item, frozen, depth = 0 }: { item: ToolCallItem; frozen: boolean; depth?: number }) {
   const isSub = item.kind === "subagent";
@@ -85,12 +110,14 @@ export function ToolCallLog({ items, frozen = false }: Props) {
 
       <div
         ref={scrollRef}
-        className="max-h-48 w-full max-w-[75%] overflow-y-auto rounded-2xl rounded-tl-sm bg-muted px-3 py-2"
+        className="max-h-72 w-full max-w-[75%] overflow-y-auto rounded-2xl rounded-tl-sm bg-muted px-3 py-2"
       >
         <ul className="flex flex-col gap-0.5">
-          {items.map((item) => (
-            <ToolItem key={item.id} item={item} frozen={frozen} />
-          ))}
+          {items.map((item) =>
+            item.kind === "plan"
+              ? <PlanItem key={item.id} item={item} />
+              : <ToolItem key={item.id} item={item} frozen={frozen} />
+          )}
         </ul>
       </div>
     </div>
