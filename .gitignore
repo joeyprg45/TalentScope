@@ -11,3 +11,15 @@ frontend/.env.local
 frontend/out/
 frontend/build/
 frontend/.turbo/
+
+# Design docs / internal notes (not part of the app)
+docs/
+scripts/
+
+# Temp / debug files
+tmp_*.json
+trace.md
+test_mcp.py
+
+# Claude Code settings (personal dev tool)
+.claude/
