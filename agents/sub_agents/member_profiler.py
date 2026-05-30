@@ -51,7 +51,7 @@ class MemberProfilerAgent:
             plugin_name="SlackPlugin",
         )
         self._kernel.add_filter(FilterTypes.AUTO_FUNCTION_INVOCATION, _tool_filter)
-        instructions = (_PROMPTS_DIR / "member_profiler.txt").read_text(encoding="utf-8")
+        instructions = (_PROMPTS_DIR / "sub_agents" / "member_profiler.txt").read_text(encoding="utf-8")
         self._agent = ChatCompletionAgent(
             kernel=self._kernel,
             name="MemberProfilerAgent",

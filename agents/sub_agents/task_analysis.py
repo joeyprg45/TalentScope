@@ -36,7 +36,7 @@ class TaskAnalysisAgent:
             plugin_name="ContributionPlugin",
         )
         self._kernel.add_filter(FilterTypes.AUTO_FUNCTION_INVOCATION, _tool_filter)
-        instructions = (_PROMPTS_DIR / "task_analysis.txt").read_text(encoding="utf-8")
+        instructions = (_PROMPTS_DIR / "sub_agents" / "task_analysis.txt").read_text(encoding="utf-8")
         self._agent = ChatCompletionAgent(
             kernel=self._kernel,
             name="TaskAnalysisAgent",

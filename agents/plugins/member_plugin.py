@@ -24,11 +24,11 @@ class MemberPlugin:
     def _resolve(self, name_or_email: str) -> str:
         return resolve_member_id(name_or_email, self._members)
 
-    @kernel_function(description="全メンバーの概要一覧（id/name/role/skills/経験年数/月次コスト）を返す")
+    @kernel_function(description="全メンバーの概要一覧（id/name/role/skills/経験年数/月次コスト/github_username）を返す")
     def list_all_members(self) -> str:
         query = (
             "SELECT c.member_id, c.name, c.role, c.skills, "
-            "c.years_experience, c.monthly_cost "
+            "c.years_experience, c.monthly_cost, c.github_username "
             "FROM c"
         )
         items = list(

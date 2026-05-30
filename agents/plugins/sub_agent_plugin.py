@@ -14,6 +14,7 @@ from semantic_kernel.functions import kernel_function
 from agents.plugins._resolve import resolve_project_id
 from agents.sub_agents import (
     ConversationAnalysisAgent,
+    GitHubAnalyzerAgent,
     MemberProfilerAgent,
     TaskAnalysisAgent,
     TeamEvaluatorAgent,
@@ -43,7 +44,7 @@ async def _emit(name: str, status: str, args: dict[str, str], result: str | None
 
 
 class SubAgentPlugin:
-    """4 つの invoke_* を提供する Main Agent 専用 plugin."""
+    """5 つの invoke_* を提供する Main Agent 専用 plugin."""
 
     def __init__(
         self,
@@ -51,19 +52,52 @@ class SubAgentPlugin:
         task: TaskAnalysisAgent,
         profiler: MemberProfilerAgent,
         evaluator: TeamEvaluatorAgent,
+        github: GitHubAnalyzerAgent,
         projects_container: ContainerProxy | None = None,
+        members_container: ContainerProxy | None = None,
     ) -> None:
         self._conv = conversation
         self._task = task
         self._profiler = profiler
         self._evaluator = evaluator
+        self._github = github
         self._projects = projects_container
+        self._members = members_container
 
     def _resolve(self, name_or_id: str) -> str:
         """プロジェクト名またはUUIDをUUIDに解決する。projects_container未注入時は元の値を返す。"""
         if not name_or_id or not self._projects:
             return name_or_id or ""
         return resolve_project_id(name_or_id, self._projects)
+
+    def _resolve_github_username(self, name_or_email: str) -> str:
+        """メンバー名・メールアドレス（prefix含む）から CosmosDB の github_username を引く。
+        見つからない・未設定の場合は元の値をそのまま返す。"""
+        if not self._members or not name_or_email:
+            return name_or_email
+        # 完全一致（メールアドレス or 氏名）で検索
+        query = "SELECT c.github_username FROM c WHERE c.member_id = @val OR c.name = @val"
+        items = list(self._members.query_items(
+            query=query,
+            parameters=[{"name": "@val", "value": name_or_email}],
+            enable_cross_partition_query=True,
+        ))
+        if items and items[0].get("github_username"):
+            return items[0]["github_username"]
+        # 部分一致（メールprefixや名前の一部）で再検索
+        all_items = list(self._members.query_items(
+            query="SELECT c.github_username, c.name, c.member_id FROM c",
+            enable_cross_partition_query=True,
+        ))
+        lower = name_or_email.lower()
+        for item in all_items:
+            name = item.get("name", "").lower()
+            email_prefix = item.get("member_id", "").split("@")[0].lower()
+            if lower in name or lower in email_prefix:
+                gh = item.get("github_username")
+                if gh:
+                    return gh
+        return name_or_email
 
     @kernel_function(
         description=(
@@ -171,4 +205,27 @@ class SubAgentPlugin:
         await _emit("invoke_team_evaluator", "start", {"draft_json": draft_json[:200]})
         result = await self._evaluator.run(draft_json)
         await _emit("invoke_team_evaluator", "done", {"draft_json": draft_json[:200]}, result)
+        return result
+
+    @kernel_function(
+        description=(
+            "GitHubAnalyzerAgent に委譲し、GitHub の実装履歴・PR・技術スタックを分析した "
+            "GitHub 技術プロファイル（~300tokens）を取得する。"
+            "メンバーデータに github_username がある場合に呼ぶ。"
+            "PJ リポジトリ（owner/repo 形式）も渡すと PJ 内の貢献量も分析する"
+        )
+    )
+    async def invoke_github_analyzer(
+        self,
+        github_username: Annotated[str, "対象メンバーの GitHub ユーザー名（例: alice-dev）"],
+        github_repo: Annotated[str, "PJ リポジトリ名（owner/repo 形式、任意）"] = "",
+        context: Annotated[str, "分析文脈（プロジェクト要件など、任意）"] = "",
+    ) -> str:
+        github_username = self._resolve_github_username(github_username)
+        args: dict[str, str] = {"github_username": github_username}
+        if github_repo:
+            args["github_repo"] = github_repo
+        await _emit("invoke_github_analyzer", "start", args)
+        result = await self._github.run(github_username, github_repo=github_repo, context=context)
+        await _emit("invoke_github_analyzer", "done", args, result)
         return result

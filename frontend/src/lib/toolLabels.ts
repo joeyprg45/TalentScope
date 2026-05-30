@@ -66,19 +66,23 @@ export function getSubAgentLabel(name: string, args?: Record<string, string>): s
   switch (name) {
     case "invoke_conversation_agent":
       return args?.target_id
-        ? `🤖 会話分析SA — ${formatId(args.target_id)}`
-        : "🤖 会話分析サブエージェント";
+        ? `会話分析サブエージェント — ${formatId(args.target_id)}`
+        : "会話分析サブエージェント";
     case "invoke_task_agent":
       return args?.target_id
-        ? `🤖 タスク分析SA — ${formatId(args.target_id)}`
-        : "🤖 タスク分析サブエージェント";
+        ? `タスク分析サブエージェント — ${formatId(args.target_id)}`
+        : "タスク分析サブエージェント";
     case "invoke_member_profiler":
       return args?.member_id
-        ? `🤖 プロファイラーSA — ${formatId(args.member_id)}`
-        : "🤖 メンバープロファイラーSA";
+        ? `メンバープロファイラーサブエージェント — ${formatId(args.member_id)}`
+        : "メンバープロファイラーサブエージェント";
     case "invoke_team_evaluator":
-      return "🤖 チーム評価SA（ドラフトレビュー）";
+      return "チーム評価サブエージェント（ドラフトレビュー）";
+    case "invoke_github_analyzer":
+      return args?.github_username
+        ? `GitHub分析サブエージェント — ${args.github_username}`
+        : "GitHub分析サブエージェント";
     default:
-      return `🤖 ${name}`;
+      return `サブエージェント: ${name}`;
   }
 }

@@ -44,8 +44,9 @@ from agents.plugins.clarification_plugin import (
 )
 from agents.sub_agents import (
     ConversationAnalysisAgent,
-    TaskAnalysisAgent,
+    GitHubAnalyzerAgent,
     MemberProfilerAgent,
+    TaskAnalysisAgent,
     TeamEvaluatorAgent,
 )
 from agents.report import build_skill_report_md, build_assignment_report_md
@@ -75,10 +76,10 @@ class AgentMode(str, Enum):
 
 
 _AXIS_PROMPT_MAP = {
-    "ability": "assignment.txt",
-    "cost":    "assignment_cost.txt",
-    "growth":  "assignment_growth.txt",
-    "synergy": "assignment_synergy.txt",
+    "ability": "assignment/ability.txt",
+    "cost":    "assignment/cost.txt",
+    "growth":  "assignment/growth.txt",
+    "synergy": "assignment/synergy.txt",
 }
 
 _AXIS_LABEL_MAP = {
@@ -91,11 +92,11 @@ _AXIS_LABEL_MAP = {
 
 def _load_prompt(mode: AgentMode, axis: str = "ability") -> str:
     if mode == AgentMode.ASSIGNMENT:
-        filename = _AXIS_PROMPT_MAP.get(axis, "assignment.txt")
+        filename = _AXIS_PROMPT_MAP.get(axis, "assignment/ability.txt")
     else:
         filename = {
-            AgentMode.BASE_CHAT:      "base_chat.txt",
-            AgentMode.SKILL_ANALYSIS: "skill_analysis.txt",
+            AgentMode.BASE_CHAT:      "orchestrator/base_chat.txt",
+            AgentMode.SKILL_ANALYSIS: "sub_agents/skill_analysis.txt",
         }[mode]
     return (_PROMPTS_DIR / filename).read_text(encoding="utf-8")
 
@@ -144,13 +145,14 @@ class TalentScopeOrchestrator:
             plugin_name="SynergyPlugin",
         )
 
-        # サブエージェント 4 つを構築して SubAgentPlugin に注入
+        # サブエージェント 5 つを構築して SubAgentPlugin に注入
         conversation_sa = ConversationAnalysisAgent(settings, containers)
         task_sa = TaskAnalysisAgent(settings, containers)
         profiler_sa = MemberProfilerAgent(settings, containers)
         evaluator_sa = TeamEvaluatorAgent(settings, containers)
+        github_sa = GitHubAnalyzerAgent(settings)
         kernel.add_plugin(
-            SubAgentPlugin(conversation_sa, task_sa, profiler_sa, evaluator_sa, containers.projects),
+            SubAgentPlugin(conversation_sa, task_sa, profiler_sa, evaluator_sa, github_sa, containers.projects, containers.members),
             plugin_name="SubAgentPlugin",
         )
         kernel.add_plugin(ClarificationPlugin(), plugin_name="ClarificationPlugin")
@@ -209,7 +211,7 @@ class TalentScopeOrchestrator:
             azure_endpoint=self._settings.azure_openai_endpoint,
             api_version=self._settings.azure_openai_api_version,
         )
-        planner_prompt = (_PROMPTS_DIR / "base_chat_planner.txt").read_text(encoding="utf-8")
+        planner_prompt = (_PROMPTS_DIR / "orchestrator" / "planner.txt").read_text(encoding="utf-8")
         messages: list[dict] = [{"role": "system", "content": planner_prompt}]
         if history:
             for msg in list(history.messages)[-4:]:

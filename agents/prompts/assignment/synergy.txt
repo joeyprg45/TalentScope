@@ -22,6 +22,10 @@
 
 5. 必要に応じて `invoke_member_profiler(member_id, "シナジー重視。過去協働実績の活用")` で深掘り
 
+5b. **GitHub補強（任意）**: プロファイルに `github_username` がある候補に対し
+    `invoke_github_analyzer(github_username, github_repo=PJリポジトリ名)` を呼ぶ
+    - 同リポジトリへの共同コントリビューション実績をシナジー根拠として活用
+
 6. シナジースコア最大のチームドラフトを組成
 
 7. `calc_project_cost(member_ids_json, project_id)` でコスト試算

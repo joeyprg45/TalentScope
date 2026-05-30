@@ -34,7 +34,7 @@ from ingest.slack_ingest import ingest_slack_vlogs, ingest_slack_channels
 # Notion ID 設定（取り込み対象）
 # ================================================================
 
-MEMBER_DS_ID = "367c7942-de09-8026-af72-000b072dfb23"
+MEMBER_DS_ID = "36bc7942-de09-81e0-99f0-000b68432fe3"  # ABC_technologiesフロントページのメンバーDB
 
 PROJECTS = [
     {

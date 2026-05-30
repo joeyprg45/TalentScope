@@ -12,6 +12,7 @@ frontend/out/
 frontend/build/
 frontend/.turbo/
 
+demodata/
 # Design docs / internal notes (not part of the app)
 docs/
 scripts/

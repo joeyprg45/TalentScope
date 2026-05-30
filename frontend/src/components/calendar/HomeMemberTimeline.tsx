@@ -181,9 +181,7 @@ export function HomeMemberTimeline({ members, projects }: Props) {
   };
 
   // ── Project view rows ──────────────────────────────────────────
-  const assignedProjects = projects.filter((p) =>
-    members.some((m) => p.assignments?.some((a) => a.member_id === m.member_id)),
-  );
+  const assignedProjects = projects;
 
   type ProjectRow =
     | { type: "project"; project: Project }

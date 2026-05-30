@@ -25,6 +25,11 @@
 4. **個別深掘り**: 絞り込んだ候補それぞれに対し `invoke_member_profiler(member_id, project_context)` を呼んで
    300tokens のプロファイルを取得する（全員ではなく必要数だけ）
 
+4b. **GitHub補強（任意）**: プロファイルに `github_username` が含まれる候補に対し
+    `invoke_github_analyzer(github_username, github_repo=PJリポジトリ名)` を呼ぶ
+    - PJ リポジトリ名はプロジェクト詳細の `github_repo` フィールドを使う（なければ省略）
+    - 実装実績・確認済みスキルをスキルマッチの根拠として補強する
+
 5. **チームドラフト組成**: プロファイル結果を元に役割・コストバランスを考慮してチームドラフトを組む
    - ドラフトは {project_id, period:{start,end}, proposed_team:[{member_id, role},...]} の JSON 形式で保持
 

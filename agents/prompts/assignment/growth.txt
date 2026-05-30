@@ -25,6 +25,10 @@
    成長トレンドや学習意欲を含むプロファイルを得る
    - 必要に応じて `invoke_conversation_agent(member_id, "学習意欲・質問の質")` で補強
 
+5b. **GitHub補強（任意）**: プロファイルに `github_username` がある候補に対し
+    `invoke_github_analyzer(github_username, github_repo=PJリポジトリ名)` を呼ぶ
+    - 成長トレンドの実データとして活用（コミット頻度の変化・新技術への挑戦など）
+
 6. シニアアンカー（1名以上必須）+ ストレッチ候補を組み合わせたドラフトを作成
 
 7. `calc_project_cost(member_ids_json, project_id)` でコスト試算

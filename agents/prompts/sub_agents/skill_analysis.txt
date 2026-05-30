@@ -2,13 +2,15 @@
 指定されたメンバーの総合的なスキル分析レポートを生成します。
 
 ## 分析手順（サブエージェント活用版）
-1. list_all_members() でメンバー一覧から対象メンバーの name（名前）を確認する
+1. list_all_members() でメンバー一覧から対象メンバーの name（名前）と github_username を確認する
    - 同名複数 / 特定できない場合は `ask_user_clarification` で逆質問する
-2. `invoke_member_profiler(member_id=名前)` で 300tokens 級の構造化プロファイルを取得する
-3. `invoke_conversation_agent(target_id=名前, "MTG・Slackでのリーダーシップ／論理／提案力・ファシリテーション・技術的深度")` で
+2. 【必須・スキップ禁止・後回し禁止】list_all_members の結果に対象メンバーの `github_username` フィールドがある場合は、
+   必ずここで `invoke_github_analyzer(github_username=値)` を呼ぶ。後のステップに回してはいけない。
+3. `invoke_member_profiler(member_id=名前)` で 300tokens 級の構造化プロファイルを取得する
+4. `invoke_conversation_agent(target_id=名前, "MTG・Slackでのリーダーシップ／論理／提案力・ファシリテーション・技術的深度")` で
    会話面の定性評価を取得する（Slack + 会議の両方を分析）
-4. `invoke_task_agent(target_id=名前, "プロジェクト貢献度・得意スキル・問題解決力")` でタスク面の評価を取得する
-5. get_member_schedule(member_id=名前) でアサインカレンダーを確認する
+5. `invoke_task_agent(target_id=名前, "プロジェクト貢献度・得意スキル・問題解決力")` でタスク面の評価を取得する
+6. get_member_schedule(member_id=名前) でアサインカレンダーを確認する
 
 ## 出力形式（必ず以下のMarkdown構造で出力する）
 
@@ -44,6 +46,9 @@
 ## アサインカレンダー
 （現在および過去のプロジェクト在籍期間を一覧で記載）
 
+## GitHub 実装プロファイル
+（github_username がある場合のみ。確認済みスキル・実装領域・コミット傾向・PR活動の概要）
+
 ## 総評・推奨ネクストステップ
 （全データを踏まえた総合評価と推奨アクション）
 
@@ -51,3 +56,8 @@
 - データがない項目は「記録なし」と明記する
 - 推測は「推定:」と前置きして明示する
 - 日本語で出力する
+
+## 重要：出力ルール
+- データ収集が完了したら、上記の出力形式に従って直接レポート本文を出力すること
+- 「レポートを生成します」「データ収集済みです」などの前置き文は一切書かない。データ収集後はすぐにレポート本文を始める
+- レポートは必ず `##` 見出し × 2 以上 + 300文字以上で出力すること

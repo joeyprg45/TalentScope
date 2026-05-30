@@ -52,7 +52,7 @@ class TeamEvaluatorAgent:
             plugin_name="TeamBalancePlugin",
         )
         self._kernel.add_filter(FilterTypes.AUTO_FUNCTION_INVOCATION, _tool_filter)
-        instructions = (_PROMPTS_DIR / "team_evaluator.txt").read_text(encoding="utf-8")
+        instructions = (_PROMPTS_DIR / "sub_agents" / "team_evaluator.txt").read_text(encoding="utf-8")
         self._agent = ChatCompletionAgent(
             kernel=self._kernel,
             name="TeamEvaluatorAgent",

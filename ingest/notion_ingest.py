@@ -156,6 +156,8 @@ def parse_project_info(notion, page_id: str) -> dict:
                 info["status"] = value
             elif label == "必要スキル":
                 info["required_skills"] = split_skills(value)
+            elif label in ("githubリポジトリリンク", "GitHub"):
+                info["github_repo"] = value
             elif label == "メンバー":
                 parts = [p.strip() for p in value.split(",")]
                 if parts:
@@ -199,7 +201,11 @@ def ingest_members(
     for row in rows:
         props = row["properties"]
         name = get_title(props, "名前")
-        email = get_rich_text(props, "email")
+        email = (
+            get_rich_text(props, "email")
+            or props.get("email", {}).get("email")
+            or ""
+        )
         if not email:
             print(f"  WARN: email なしのメンバーをスキップ: {name!r}")
             continue
@@ -215,6 +221,7 @@ def ingest_members(
             "years_experience": props.get("経験年数", {}).get("number") or 0,
             "monthly_cost": props.get("月次コスト", {}).get("number") or 0,
             "note": get_rich_text(props, "一言メモ"),
+            "github_username": get_rich_text(props, "githubアカウント名") or get_rich_text(props, "GitHub"),
             "source": {"notion_page_id": row["id"], "synced_at": now_iso()},
         }
         cosmos_members.upsert_item(doc)
@@ -292,6 +299,7 @@ def ingest_project(
         "required_skills": project_info.get("required_skills", []),
         "period": project_info.get("period", {}),
         "status": project_info.get("status", ""),
+        "github_repo": project_info.get("github_repo", ""),
         "assignments": assignments,
         "member_ids": [a["member_id"] for a in assignments] or list(member_ids),
         "tasks": task_docs,

@@ -7,10 +7,12 @@ from agents.sub_agents.conversation_analysis import ConversationAnalysisAgent
 from agents.sub_agents.task_analysis import TaskAnalysisAgent
 from agents.sub_agents.member_profiler import MemberProfilerAgent
 from agents.sub_agents.team_evaluator import TeamEvaluatorAgent
+from agents.sub_agents.github_analyzer import GitHubAnalyzerAgent
 
 __all__ = [
     "ConversationAnalysisAgent",
     "TaskAnalysisAgent",
     "MemberProfilerAgent",
     "TeamEvaluatorAgent",
+    "GitHubAnalyzerAgent",
 ]
