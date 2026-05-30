@@ -10,7 +10,7 @@ import os
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
-from api.routers import chat, chat_sessions, health, meetings, members, projects, reports
+from api.routers import chat, chat_sessions, health, meetings, members, memory, projects, prompts, reports
 
 app = FastAPI(title="TalentScope API", version="0.1.0")
 
@@ -37,5 +37,7 @@ app.include_router(members.router,  prefix="/api/members",  tags=["members"])
 app.include_router(projects.router, prefix="/api/projects", tags=["projects"])
 app.include_router(meetings.router, prefix="/api/meetings", tags=["meetings"])
 app.include_router(reports.router,  prefix="/api/reports",  tags=["reports"])
+app.include_router(prompts.router,       prefix="/api/prompts",       tags=["prompts"])
 app.include_router(chat.router,          prefix="/api/chat",          tags=["chat"])
 app.include_router(chat_sessions.router, prefix="/api/chat",          tags=["chat-sessions"])
+app.include_router(memory.router,        prefix="/api/memory",         tags=["memory"])

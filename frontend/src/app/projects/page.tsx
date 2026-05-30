@@ -44,7 +44,7 @@ export default function ProjectsPage() {
   const others = projects.filter((p) => p.status !== "active" && p.status !== "planning");
 
   return (
-    <div className="space-y-8">
+    <div className="h-full overflow-y-auto p-6 space-y-8">
       <div>
         <h1 className="text-2xl font-bold">プロジェクト</h1>
         <p className="mt-1 text-sm text-muted-foreground">{projects.length} 件登録</p>

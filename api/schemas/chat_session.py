@@ -14,8 +14,8 @@ class ChatSession(BaseModel):
     display_messages: list[ChatSessionMessage]
     sk_history: list[ChatSessionMessage]
     current_report_id: str | None = None
-    current_axis: str = "ability"
     trace_log: list[dict] = []
+    memory_extracted_at: str | None = None
     created_at: str
     updated_at: str
 
@@ -23,5 +23,6 @@ class ChatSession(BaseModel):
 class ChatSessionListItem(BaseModel):
     id: str
     title: str
+    memory_extracted_at: str | None = None
     created_at: str
     updated_at: str

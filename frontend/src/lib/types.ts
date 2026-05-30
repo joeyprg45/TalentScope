@@ -35,6 +35,19 @@ export type Meeting = {
 
 export type HealthResponse = { status: string };
 
+// --- Prompts ---
+export type PromptNode = {
+  id: string;
+  parent_id: string | null;
+  name: string;
+  description: string;
+  trigger_conditions: string;
+  ceo_layer: string;
+  is_system: boolean;
+  is_selectable: boolean;
+  children: PromptNode[];
+};
+
 // --- Chat ---
 export type ChatRole = "user" | "assistant";
 
@@ -44,6 +57,7 @@ export type ChatMessage = {
   content: string;
   isStreaming?: boolean;
   toolLog?: ToolCallItem[];
+  detectedMode?: { id: string; name: string };
 };
 
 export type ToolCallStatus = "running" | "done";
@@ -93,6 +107,24 @@ export type ChatSessionItem = {
   title: string;
   createdAt: string;
   updatedAt: string;
+  memoryExtractedAt?: string | null;
+};
+
+// --- Memory ---
+export type AbsoluteConstraint = {
+  id: string;
+  content: string;
+  status: "pending" | "active" | "dismissed";
+  source: "ai" | "manual";
+  related_member_ids: string[];
+  created_at: string;
+  chat_id?: string | null;
+};
+
+export type ExtractionResult = {
+  processed: number;
+  constraints_found: number;
+  qualitative_updated: boolean;
 };
 
 export type TraceEntry = Record<string, unknown>;

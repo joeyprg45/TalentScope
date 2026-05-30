@@ -12,7 +12,6 @@ import {
   DialogHeader,
   DialogTitle,
 } from "@/components/ui/dialog";
-import { AssignAxisSelector } from "./AssignAxisSelector";
 import { ClarificationPanel } from "./ClarificationPanel";
 import { MessageInput } from "./MessageInput";
 import { MessageList } from "./MessageList";
@@ -30,7 +29,6 @@ export function ChatSidebar() {
   const {
     activeChatId,
     messages, status, sendMessage,
-    pendingAssignmentContent, confirmAxisAndSend, cancelAssignmentPrompt,
     pendingClarification, submitClarification,
     toolCallLog,
     activeReportTitle, clearActiveReport,
@@ -173,7 +171,12 @@ export function ChatSidebar() {
               >
                 <div className="min-w-0 flex-1">
                   <p className="truncate text-xs font-medium">{s.title}</p>
-                  <p className="text-[10px] text-muted-foreground">{formatDate(s.updatedAt)}</p>
+                  <p className="text-[10px] text-muted-foreground">
+                    {formatDate(s.updatedAt)}
+                    <span className="ml-1" title={s.memoryExtractedAt ? "抽出済み" : "未処理"}>
+                      {s.memoryExtractedAt ? "✅" : "⬜"}
+                    </span>
+                  </p>
                 </div>
                 <button
                   onClick={(e) => handleDeleteSession(e, s.id)}
@@ -204,12 +207,6 @@ export function ChatSidebar() {
       )}
 
       <MessageList messages={messages} status={status} toolCallLog={toolCallLog} />
-      {pendingAssignmentContent !== null && (
-        <AssignAxisSelector
-          onChange={confirmAxisAndSend}
-          onCancel={cancelAssignmentPrompt}
-        />
-      )}
       {pendingClarification !== null && (
         <ClarificationPanel
           prompt={pendingClarification}
@@ -221,7 +218,6 @@ export function ChatSidebar() {
         disabled={
           status === "streaming" ||
           status === "connecting" ||
-          pendingAssignmentContent !== null ||
           pendingClarification !== null
         }
       />

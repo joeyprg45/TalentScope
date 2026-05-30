@@ -1,4 +1,4 @@
-import type { HealthResponse, Meeting, Member, Project } from "./types";
+import type { AbsoluteConstraint, ExtractionResult, HealthResponse, Meeting, Member, Project, PromptNode } from "./types";
 
 const BASE = process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:8000";
 
@@ -29,4 +29,43 @@ export const api = {
   project: (id: string) =>
     request<Project>(`/api/projects/${encodeURIComponent(id)}`),
   meetings: () => request<Meeting[]>("/api/meetings"),
+  prompts: () => request<PromptNode[]>("/api/prompts"),
+  updatePrompt: (id: string, body: { ceo_layer?: string; trigger_conditions?: string }) =>
+    request<PromptNode>(`/api/prompts/${encodeURIComponent(id)}`, {
+      method: "PUT",
+      body: JSON.stringify(body),
+    }),
+  createPrompt: (body: {
+    id: string;
+    parent_id?: string | null;
+    name: string;
+    description?: string;
+    ceo_layer?: string;
+    is_selectable?: boolean;
+  }) => request<PromptNode>("/api/prompts", { method: "POST", body: JSON.stringify(body) }),
+  deletePrompt: (id: string) =>
+    fetch(`${BASE}/api/prompts/${encodeURIComponent(id)}`, { method: "DELETE" }),
+  memory: {
+    listConstraints: () => request<AbsoluteConstraint[]>("/api/memory/constraints"),
+    createConstraint: (content: string, related_member_ids?: string[]) =>
+      request<AbsoluteConstraint>("/api/memory/constraints", {
+        method: "POST",
+        body: JSON.stringify({ content, related_member_ids: related_member_ids ?? [] }),
+      }),
+    updateConstraintStatus: (id: string, status: string) =>
+      request<{ id: string; status: string }>(
+        `/api/memory/constraints/${encodeURIComponent(id)}`,
+        { method: "PATCH", body: JSON.stringify({ status }) }
+      ),
+    deleteConstraint: (id: string) =>
+      fetch(`${BASE}/api/memory/constraints/${encodeURIComponent(id)}`, { method: "DELETE" }),
+    getQualitative: () => request<{ content: string }>("/api/memory/qualitative"),
+    updateQualitative: (content: string) =>
+      request<{ content: string }>("/api/memory/qualitative", {
+        method: "PUT",
+        body: JSON.stringify({ content }),
+      }),
+    extractMemory: () => request<ExtractionResult>("/api/memory/extract", { method: "POST" }),
+    getUnprocessedCount: () => request<{ count: number }>("/api/memory/unprocessed_count"),
+  },
 };

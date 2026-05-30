@@ -19,11 +19,16 @@
    プロジェクト期間に他PJの稼働がないメンバーだけを候補プールとする。
    → 稼働中のメンバーをアサイン候補に絶対含めない
 
-3. **必要スキル確認**: `find_skill_gaps(project_id, "[]")` で現在のPJに必要なスキル一覧を取得し、
-   候補プールから必要スキルを満たすメンバーに絞り込む
+3. **スキルフィルタリング（ツール不要・手動判断）**:
+   - Step 1 で得たプロジェクト必要スキルと、Step 2 で得た候補メンバーのスキルリストを照合する
+   - 必要スキルを1つ以上保有する候補を絞り込み、プロファイル対象リストを作成する（3〜5名目安）
+   - `find_skill_gaps` はチームドラフト完成後（Step 5 の後）にカバレッジ確認として使う
+   ⚠️ member_ids を渡す際は必ず JSON 形式で: ["id1@email.com", "id2@email.com"]
+      Python式 ['id1', 'id2'] はツールがパース不能になるため使わないこと
 
-4. **個別深掘り**: 絞り込んだ候補それぞれに対し `invoke_member_profiler(member_id, project_context)` を呼んで
-   300tokens のプロファイルを取得する（全員ではなく必要数だけ）
+4. **個別深掘り（最低3名・最大5名をプロファイル）**: 絞り込んだ候補に対し `invoke_member_profiler(member_id, project_context)` を呼んで
+   300tokens のプロファイルを取得する
+   → スキルが近い順に3〜5名を必ずプロファイルすること。1名で打ち切らない。
 
 4b. **GitHub補強（任意）**: プロファイルに `github_username` が含まれる候補に対し
     `invoke_github_analyzer(github_username, github_repo=PJリポジトリ名)` を呼ぶ

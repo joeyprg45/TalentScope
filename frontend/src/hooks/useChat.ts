@@ -8,7 +8,6 @@ import type {
   SavedReport,
   ToolCallItem,
 } from "@/lib/types";
-import type { AssignAxis } from "@/components/chat/AssignAxisSelector";
 import { getToolLabel, getSubAgentLabel } from "@/lib/toolLabels";
 
 const MAX_RECONNECT = 5;
@@ -33,7 +32,6 @@ export function useChat() {
   const toolCallLogRef = useRef<ToolCallItem[]>([]);
   const currentReportIdRef = useRef<string | null>(null);
   const currentReportMarkdownRef = useRef<string>("");
-  const selectedAxisRef = useRef<string>("ability");
   const currentSubagentIdRef = useRef<string | null>(null);
 
   const [activeChatId, setActiveChatId] = useState<string>("");
@@ -44,7 +42,6 @@ export function useChat() {
   const [currentSkillReport, setCurrentSkillReport] = useState<ReportData | null>(null);
   const [isReportLoading, setIsReportLoading] = useState(false);
   const [isSkillReportLoading, setIsSkillReportLoading] = useState(false);
-  const [pendingAssignmentContent, setPendingAssignmentContent] = useState<string | null>(null);
   const [pendingClarification, setPendingClarification] = useState<ClarificationPrompt | null>(null);
   const [toolCallLog, setToolCallLog] = useState<ToolCallItem[]>([]);
   const [currentPlanText, setCurrentPlanText] = useState<string>("");
@@ -159,6 +156,15 @@ export function useChat() {
             );
             setToolCallLog([...toolCallLogRef.current]);
           }
+        } else if (data.type === "mode_detected") {
+          setMessages((prev) => {
+            const last = prev.at(-1);
+            if (!last || !last.isStreaming) return prev;
+            return [
+              ...prev.slice(0, -1),
+              { ...last, detectedMode: { id: data.mode_id as string, name: data.mode_name as string } },
+            ];
+          });
         } else if (data.type === "clarification_prompt") {
           setPendingClarification({
             id: data.id as string,
@@ -218,13 +224,6 @@ export function useChat() {
               toolLog: frozenLog.length > 0 ? frozenLog : undefined,
             }];
           });
-        } else if (data.type === "axis_prompt") {
-          setMessages((prev) => {
-            const last = prev.at(-1);
-            return last?.isStreaming ? prev.slice(0, -1) : prev;
-          });
-          setStatus("connected");
-          setPendingAssignmentContent(data.original_content as string);
         } else if (data.type === "report_chunk") {
           reportAccRef.current += data.text as string;
         } else if (data.type === "report_done") {
@@ -363,28 +362,6 @@ export function useChat() {
     [status],
   );
 
-  const confirmAxisAndSend = useCallback(
-    (selectedAxis: AssignAxis) => {
-      selectedAxisRef.current = selectedAxis;
-      const content = pendingAssignmentContent;
-      if (!content) return;
-      const ws = wsRef.current;
-      if (!ws || ws.readyState !== WebSocket.OPEN) return;
-      setPendingAssignmentContent(null);
-      setMessages((prev) => [
-        ...prev.filter((m) => !m.isStreaming),
-        { id: crypto.randomUUID(), role: "assistant", content: "", isStreaming: true },
-      ]);
-      setStatus("streaming");
-      ws.send(JSON.stringify({ type: "axis_confirm", axis: selectedAxis, original_content: content }));
-    },
-    [pendingAssignmentContent],
-  );
-
-  const cancelAssignmentPrompt = useCallback(() => {
-    setPendingAssignmentContent(null);
-  }, []);
-
   const submitClarification = useCallback(
     (answerId: string, answerText?: string) => {
       const ws = wsRef.current;
@@ -472,7 +449,6 @@ export function useChat() {
     messages, status, errorMessage, sendMessage, clearMessages,
     currentReport, clearReport, isReportLoading,
     currentSkillReport, clearSkillReport, isSkillReportLoading,
-    pendingAssignmentContent, confirmAxisAndSend, cancelAssignmentPrompt,
     pendingClarification, submitClarification,
     toolCallLog,
     currentPlanText, isPlanStreaming,

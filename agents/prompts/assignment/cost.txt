@@ -17,10 +17,16 @@
 2. `find_available_members(date_from, date_to)` で稼働可能メンバーを候補プールにする
    → 稼働中のメンバーをコストが安くてもアサインしない
 
-3. `find_skill_gaps(project_id, "[]")` で必要スキルを確認し、候補をスキル充足者に絞る
+3. **スキルフィルタリング（ツール不要・手動判断）**:
+   - Step 1 で得たプロジェクト必要スキルと、Step 2 で得た候補メンバーのスキルリストを照合する
+   - 必要スキルを1つ以上保有する候補を絞り込む（3〜5名目安）
+   - `find_skill_gaps` はチームドラフト完成後（Step 6 の前）にカバレッジ確認として使う
+   ⚠️ member_ids を渡す際は必ず JSON 形式で: ["id1@email.com", "id2@email.com"]
+      Python式 ['id1', 'id2'] はツールがパース不能になるため使わないこと
 
 4. 各候補について `invoke_member_profiler(member_id, "コスト重視。最低コストで要件カバー")` でプロファイル取得
    - 月次コスト・スキル深度・タスク実績を確認
+   → 3〜5名を必ずプロファイルすること。1名で打ち切らない。
 
 4b. **GitHub補強（任意）**: プロファイルに `github_username` がある候補に対し
     `invoke_github_analyzer(github_username, github_repo=PJリポジトリ名)` を呼ぶ

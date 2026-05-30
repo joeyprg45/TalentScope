@@ -75,29 +75,12 @@ class AgentMode(str, Enum):
     ASSIGNMENT      = "assignment"
 
 
-_AXIS_PROMPT_MAP = {
-    "ability": "assignment/ability.txt",
-    "cost":    "assignment/cost.txt",
-    "growth":  "assignment/growth.txt",
-    "synergy": "assignment/synergy.txt",
-}
-
-_AXIS_LABEL_MAP = {
-    "ability": "能力重視",
-    "cost":    "コスト重視",
-    "growth":  "育成・チャレンジ重視",
-    "synergy": "チームワーク・シナジー重視",
-}
-
-
-def _load_prompt(mode: AgentMode, axis: str = "ability") -> str:
-    if mode == AgentMode.ASSIGNMENT:
-        filename = _AXIS_PROMPT_MAP.get(axis, "assignment/ability.txt")
-    else:
-        filename = {
-            AgentMode.BASE_CHAT:      "orchestrator/base_chat.txt",
-            AgentMode.SKILL_ANALYSIS: "sub_agents/skill_analysis.txt",
-        }[mode]
+def _load_prompt(mode: AgentMode) -> str:
+    filename = {
+        AgentMode.BASE_CHAT:      "orchestrator/base_chat.txt",
+        AgentMode.SKILL_ANALYSIS: "sub_agents/skill_analysis.txt",
+        AgentMode.ASSIGNMENT:     "assignment/ability.txt",
+    }[mode]
     return (_PROMPTS_DIR / filename).read_text(encoding="utf-8")
 
 
@@ -160,11 +143,28 @@ class TalentScopeOrchestrator:
         kernel.add_filter(FilterTypes.AUTO_FUNCTION_INVOCATION, _tool_filter)
         return kernel
 
-    def _build_agent(self, mode: AgentMode, axis: str = "ability") -> ChatCompletionAgent:
+    def _build_agent(
+        self,
+        mode: AgentMode,
+        ceo_layer: str = "",
+        constraints: list[str] | None = None,
+        qualitative: str = "",
+    ) -> ChatCompletionAgent:
+        if mode == AgentMode.ASSIGNMENT and ceo_layer:
+            instructions = ceo_layer
+        else:
+            instructions = _load_prompt(mode)
+            if ceo_layer:
+                instructions += f"\n\n## 追加指示\n{ceo_layer}"
+        if constraints:
+            lines = "\n".join(f"- {c}" for c in constraints)
+            instructions += f"\n\n## 絶対条件（違反禁止）\n{lines}"
+        if qualitative:
+            instructions += f"\n\n## 方針・判断基準\n{qualitative}"
         return ChatCompletionAgent(
             kernel=self._kernel,
             name="TalentScopeAgent",
-            instructions=_load_prompt(mode, axis),
+            instructions=instructions,
             function_choice_behavior=FunctionChoiceBehavior.Auto(),
         )
 
@@ -172,14 +172,53 @@ class TalentScopeOrchestrator:
         self,
         user_message: str,
         has_current_report: bool = False,
+        mode_candidates: list[dict] | None = None,
     ) -> str:
-        """ユーザーメッセージの意図を分類する。"assignment" | "skill" | "refine" | "chat" を返す。"""
+        """ユーザーメッセージの意図を分類する。
+
+        動的モード: mode_candidates が渡された場合、Cosmos の発火条件を使って分類する。
+        戻り値: "assignment" | "skill_analysis" | "refine" | mode_id | "none"
+        """
         from openai import AsyncAzureOpenAI
         client = AsyncAzureOpenAI(
             api_key=self._settings.azure_openai_api_key,
             azure_endpoint=self._settings.azure_openai_endpoint,
             api_version=self._settings.azure_openai_api_version,
         )
+
+        if mode_candidates:
+            # 動的分類: Cosmos のモード一覧（trigger_conditions）を使用
+            effective = list(mode_candidates)
+            if has_current_report:
+                effective.insert(0, {
+                    "id": "refine",
+                    "trigger_conditions": (
+                        "既存レポートへの修正・変更指示。"
+                        "例: 「田中を外して別の人に」「コストを下げて」「リーダーを佐藤に変更して」"
+                    ),
+                })
+            mode_lines = "\n".join(
+                f"- {m['id']}: {m['trigger_conditions']}"
+                for m in effective if m.get("trigger_conditions")
+            )
+            prompt = (
+                "以下のモード一覧を参照し、ユーザー発言がどのモードの発火条件に当てはまるかを判定してください。\n"
+                "どのモードにも当てはまらない場合は \"none\" を返してください。\n"
+                "モードIDのみを1単語で返してください（他の文字は含めない）。\n\n"
+                f"利用可能なモード:\n{mode_lines}\n\n"
+                f"ユーザー発言: {user_message}"
+            )
+            response = await client.chat.completions.create(
+                model=self._settings.azure_openai_chat_deployment,
+                messages=[{"role": "user", "content": prompt}],
+                max_tokens=20,
+                temperature=0,
+            )
+            result = (response.choices[0].message.content or "").strip().lower().split()[0]
+            known_ids = {m["id"] for m in effective}
+            return result if result in known_ids else "none"
+
+        # フォールバック: 固定分類（mode_candidates なし）
         context = f"current_report={'あり' if has_current_report else 'なし'}\n\nユーザー発言: {user_message}"
         response = await client.chat.completions.create(
             model=self._settings.azure_openai_chat_deployment,
@@ -194,10 +233,10 @@ class TalentScopeOrchestrator:
         if result.startswith("assignment"):
             return "assignment"
         if result.startswith("skill"):
-            return "skill"
+            return "skill_analysis"
         if result.startswith("refine") and has_current_report:
             return "refine"
-        return "chat"
+        return "none"
 
     async def plan_query(
         self,
@@ -234,8 +273,10 @@ class TalentScopeOrchestrator:
         user_message: str,
         mode: AgentMode = AgentMode.BASE_CHAT,
         history: ChatHistory | None = None,
-        axis: str = "ability",
         plan_hint: str | None = None,
+        constraints: list[str] | None = None,
+        qualitative: str = "",
+        ceo_layer: str = "",
         on_tool_call: ToolCallCallback | None = None,
         on_subagent_call: SubAgentCallback | None = None,
         on_clarification: ClarificationCallback | None = None,
@@ -257,7 +298,7 @@ class TalentScopeOrchestrator:
         else:
             exec_history = history
 
-        agent = self._build_agent(mode, axis)
+        agent = self._build_agent(mode, ceo_layer, constraints, qualitative)
         full_response: list[str] = []
 
         tool_token = _tool_callback_var.set(on_tool_call) if on_tool_call is not None else None
@@ -289,7 +330,9 @@ class TalentScopeOrchestrator:
         user_message: str,
         mode: AgentMode,
         history: ChatHistory | None = None,
-        axis: str = "ability",
+        constraints: list[str] | None = None,
+        qualitative: str = "",
+        ceo_layer: str = "",
         on_tool_call: ToolCallCallback | None = None,
         on_subagent_call: SubAgentCallback | None = None,
         on_clarification: ClarificationCallback | None = None,
@@ -300,7 +343,7 @@ class TalentScopeOrchestrator:
             history = ChatHistory()
         history.add_user_message(user_message)
 
-        agent = self._build_agent(mode, axis)
+        agent = self._build_agent(mode, ceo_layer, constraints, qualitative)
         full_response = ""
 
         tool_token = _tool_callback_var.set(on_tool_call) if on_tool_call is not None else None
@@ -329,7 +372,9 @@ class TalentScopeOrchestrator:
         mode: AgentMode,
         target_id: str,
         target_name: str = "",
-        axis: str = "ability",
+        constraints: list[str] | None = None,
+        qualitative: str = "",
+        ceo_layer: str = "",
         on_tool_call: ToolCallCallback | None = None,
         on_subagent_call: SubAgentCallback | None = None,
         on_clarification: ClarificationCallback | None = None,
@@ -354,13 +399,11 @@ class TalentScopeOrchestrator:
                 f"メンバー {target_id} の個人スキル分析レポートを作成してください。"
             )
         else:
-            axis_label = _AXIS_LABEL_MAP.get(axis, axis)
             history.add_user_message(
                 f"プロジェクト {target_id} のアサイン提案レポートを作成してください。"
-                f"提案軸は「{axis_label}」です。"
             )
 
-        agent = self._build_agent(mode, axis)
+        agent = self._build_agent(mode, ceo_layer, constraints, qualitative)
         agent_body = ""
 
         tool_token = _tool_callback_var.set(on_tool_call) if on_tool_call is not None else None
@@ -390,7 +433,7 @@ class TalentScopeOrchestrator:
         else:
             full_md = build_assignment_report_md(
                 project_name=target_name or target_id,
-                axis=axis,
+                axis="",
                 agent_body=agent_body,
             )
 
@@ -405,9 +448,11 @@ class TalentScopeOrchestrator:
         mode: AgentMode,
         target_id: str,
         target_name: str,
-        axis: str,
         current_report_md: str,
         user_feedback: str,
+        constraints: list[str] | None = None,
+        qualitative: str = "",
+        ceo_layer: str = "",
         on_tool_call: ToolCallCallback | None = None,
         on_subagent_call: SubAgentCallback | None = None,
         on_clarification: ClarificationCallback | None = None,
@@ -435,7 +480,7 @@ class TalentScopeOrchestrator:
             f"2行目以降: 修正済みレポートのMarkdown本文のみ（変更説明・前置き文は含めないこと）"
         )
 
-        agent = self._build_agent(mode, axis)
+        agent = self._build_agent(mode, ceo_layer, constraints, qualitative)
         agent_body = ""
 
         tool_token = _tool_callback_var.set(on_tool_call) if on_tool_call is not None else None
@@ -471,7 +516,7 @@ class TalentScopeOrchestrator:
         else:
             full_md = build_assignment_report_md(
                 project_name=target_name or target_id,
-                axis=axis,
+                axis="",
                 agent_body=report_body,
             )
 

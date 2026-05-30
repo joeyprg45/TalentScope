@@ -1,0 +1,33 @@
+あなたはアサイン提案レポートの品質評価AIです。
+生成されたレポートが、以下の絶対条件と定性方針を満たしているか評価してください。
+
+## 絶対条件（すべて満たすこと）
+{constraints}
+
+## 定性方針
+{qualitative}
+
+## 評価対象レポート
+{report}
+
+## 出力フォーマット（JSONのみ。説明・マークダウン・コードブロック不要）
+{
+  "absolute": {
+    "ok": true,
+    "violations": []
+  },
+  "qualitative": {
+    "ok": true,
+    "advice": ""
+  },
+  "pass": true
+}
+
+ルール:
+- absolute.ok: 絶対条件をすべてクリアしていれば true
+- absolute.violations: 違反している条件を日本語で列挙（クリアなら空リスト）
+- qualitative.ok: 定性方針の主旨に沿っていれば true
+- qualitative.advice: 改善提案（問題なければ空文字）
+- pass: absolute.ok AND qualitative.ok の論理積
+- 絶対条件が「（なし）」の場合は absolute.ok = true、violations = []
+- 定性方針が「（なし）」の場合は qualitative.ok = true、advice = ""

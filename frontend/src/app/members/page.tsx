@@ -42,7 +42,7 @@ export default function MembersPage() {
   }
 
   return (
-    <div className="space-y-6">
+    <div className="h-full overflow-y-auto p-6 space-y-6">
       <div>
         <h1 className="text-2xl font-bold">メンバー</h1>
         <p className="mt-1 text-sm text-muted-foreground">{members.length} 名登録</p>

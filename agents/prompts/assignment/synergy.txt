@@ -14,9 +14,14 @@
 
 2. `find_available_members(date_from, date_to)` で稼働可能メンバーを候補プールに
 
-3. `find_skill_gaps(project_id, "[]")` で必要スキル確認・候補絞り込み
+3. **スキルフィルタリング（ツール不要・手動判断）**:
+   - Step 1 で得たプロジェクト必要スキルと、Step 2 で得た候補メンバーのスキルリストを照合する
+   - 必要スキルを1つ以上保有する候補を絞り込む（3〜6名目安）
+   - `find_skill_gaps` はチームドラフト完成後（Step 6 の後）にカバレッジ確認として使う
+   ⚠️ member_ids を渡す際は必ず JSON 形式で: ["id1@email.com", "id2@email.com"]
+      Python式 ['id1', 'id2'] はツールがパース不能になるため使わないこと
 
-4. 絞り込んだ候補IDを JSON 配列にまとめ、`get_collaboration_matrix(member_ids_json)` を **1回だけ** 呼ぶ
+4. 絞り込んだ候補IDを JSON 配列（ダブルクォート）にまとめ、`get_collaboration_matrix(member_ids_json)` を **1回だけ** 呼ぶ
    - synergy_score（共同PJ×2 + 共同会議数）が高いペアを優先
    - チーム全体のシナジースコア合計が最大になる組み合わせを選ぶ
 

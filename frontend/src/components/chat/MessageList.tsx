@@ -46,8 +46,18 @@ export function MessageList({ messages, status, toolCallLog = [] }: Props) {
         {messages.map((msg) => {
           // ストリーミング中・content なし → ToolCallLog をその位置に表示
           if (msg.isStreaming && !msg.content) {
-            if (toolCallLog.length > 0) return <ToolCallLog key={msg.id} items={toolCallLog} />;
-            return null;
+            return (
+              <Fragment key={msg.id}>
+                {msg.detectedMode && (
+                  <div className="flex items-start gap-2 pl-8 -mb-2">
+                    <span className="inline-flex items-center rounded-full bg-primary/10 px-2.5 py-0.5 text-xs font-medium text-primary">
+                      {msg.detectedMode.name}モード
+                    </span>
+                  </div>
+                )}
+                {toolCallLog.length > 0 && <ToolCallLog items={toolCallLog} />}
+              </Fragment>
+            );
           }
 
           // frozen tool-log-only（アサイン/スキルレポート用）
@@ -102,6 +112,13 @@ function MessageBubble({ message }: { message: ChatMessage }) {
           <p className="whitespace-pre-wrap break-words">{message.content}</p>
         ) : (
           <div className="markdown-body">
+            {message.detectedMode && (
+              <div className="mb-2">
+                <span className="inline-flex items-center rounded-full bg-primary/10 px-2.5 py-0.5 text-xs font-medium text-primary">
+                  {message.detectedMode.name}モード
+                </span>
+              </div>
+            )}
             <ReactMarkdown remarkPlugins={[remarkGfm]}>
               {message.content}
             </ReactMarkdown>

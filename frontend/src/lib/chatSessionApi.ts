@@ -7,6 +7,7 @@ type RawSession = {
   title: string;
   created_at: string;
   updated_at: string;
+  memory_extracted_at?: string | null;
 };
 
 export async function fetchChatSessions(): Promise<ChatSessionItem[]> {
@@ -19,6 +20,7 @@ export async function fetchChatSessions(): Promise<ChatSessionItem[]> {
       title: s.title,
       createdAt: s.created_at,
       updatedAt: s.updated_at,
+      memoryExtractedAt: s.memory_extracted_at ?? null,
     }));
   } catch {
     return [];

@@ -11,7 +11,7 @@ class SessionData:
     history: ChatHistory = field(default_factory=ChatHistory)
     current_report: str | None = None     # 最新のアサイン提案レポート Markdown
     current_report_id: str | None = None  # CosmosDB の reports コンテナ ID
-    current_axis: str = "ability"         # 最後のアサイン提案で使った提案軸
+    ceo_layer: str = ""                   # 直前メッセージで判別されたモードの判断基準
 
 
 _sessions: dict[str, SessionData] = {}

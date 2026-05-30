@@ -6,6 +6,7 @@ import {
   Briefcase,
   FileText,
   Home,
+  Settings,
   Users,
 } from "lucide-react";
 
@@ -16,6 +17,7 @@ const NAV = [
   { href: "/members", label: "メンバー", icon: Users },
   { href: "/projects", label: "プロジェクト", icon: Briefcase },
   { href: "/reports", label: "レポート", icon: FileText },
+  { href: "/settings", label: "AI設定", icon: Settings },
 ];
 
 export function Sidebar() {

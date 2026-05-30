@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from fastapi import APIRouter, Depends, HTTPException
 
+from agents.cosmos_client import get_active_constraints, get_qualitative_memory
 from agents.orchestrator import AgentMode
 from api.deps import get_cosmos, get_orchestrator
 from api.schemas.reports import (
@@ -25,29 +26,43 @@ router = APIRouter()
 # ── 既存: レポート生成 (チャット経由とは別の直接API) ──────────────────────────
 
 @router.post("/skill-analysis", response_model=ReportResponse)
-async def skill_analysis(req: SkillAnalysisRequest, orch=Depends(get_orchestrator)) -> ReportResponse:
+async def skill_analysis(
+    req: SkillAnalysisRequest,
+    orch=Depends(get_orchestrator),
+    cosmos=Depends(get_cosmos),
+) -> ReportResponse:
     summary, full_md = await orch.generate_report(
         mode=AgentMode.SKILL_ANALYSIS,
         target_id=req.member_id,
         target_name=req.member_name,
-        axis="ability",
+        constraints=get_active_constraints(cosmos),
+        qualitative=get_qualitative_memory(cosmos),
     )
     return ReportResponse(summary=summary, markdown=full_md)
 
 
 @router.post("/assignment", response_model=ReportResponse)
-async def assignment(req: AssignmentRequest, orch=Depends(get_orchestrator)) -> ReportResponse:
+async def assignment(
+    req: AssignmentRequest,
+    orch=Depends(get_orchestrator),
+    cosmos=Depends(get_cosmos),
+) -> ReportResponse:
     summary, full_md = await orch.generate_report(
         mode=AgentMode.ASSIGNMENT,
         target_id=req.project_id,
         target_name=req.project_name,
-        axis=req.axis,
+        constraints=get_active_constraints(cosmos),
+        qualitative=get_qualitative_memory(cosmos),
     )
     return ReportResponse(summary=summary, markdown=full_md)
 
 
 @router.post("/refine", response_model=RefineResponse)
-async def refine(req: RefineRequest, orch=Depends(get_orchestrator)) -> RefineResponse:
+async def refine(
+    req: RefineRequest,
+    orch=Depends(get_orchestrator),
+    cosmos=Depends(get_cosmos),
+) -> RefineResponse:
     try:
         mode = AgentMode(req.mode)
     except ValueError as exc:
@@ -57,9 +72,10 @@ async def refine(req: RefineRequest, orch=Depends(get_orchestrator)) -> RefineRe
         mode=mode,
         target_id=req.target_id,
         target_name=req.target_name,
-        axis=req.axis,
         current_report_md=req.current_report_md,
         user_feedback=req.user_feedback,
+        constraints=get_active_constraints(cosmos),
+        qualitative=get_qualitative_memory(cosmos),
     )
     return RefineResponse(change_summary=summary, markdown=full_md)
 
