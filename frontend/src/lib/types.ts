@@ -61,7 +61,7 @@ export type ChatMessage = {
 };
 
 export type ToolCallStatus = "running" | "done";
-export type ToolCallKind = "tool" | "subagent" | "plan";
+export type ToolCallKind = "tool" | "subagent" | "plan" | "eval" | "eval_correction";
 
 export type ToolCallItem = {
   id: string;
@@ -72,6 +72,14 @@ export type ToolCallItem = {
   kind?: ToolCallKind;
   planText?: string;
   children?: ToolCallItem[];
+  evalPassed?: boolean;
+  evalAttempt?: number;
+  evalViolations?: string[];
+  evalAdvice?: string;
+  evalAbsoluteOk?: boolean;
+  evalQualitativeOk?: boolean;
+  evalTotalConstraints?: number;
+  evalPassedConstraints?: number;
 };
 
 export type ClarificationOption = {

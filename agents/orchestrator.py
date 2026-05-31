@@ -7,7 +7,7 @@ from __future__ import annotations
 
 import pathlib
 from enum import Enum
-from typing import AsyncGenerator
+from typing import Annotated, AsyncGenerator
 
 from semantic_kernel import Kernel
 from semantic_kernel.agents import ChatCompletionAgent
@@ -21,15 +21,14 @@ _INVOKE_ARGS = KernelArguments(
 from semantic_kernel.contents.chat_history import ChatHistory
 from semantic_kernel.contents import ChatMessageContent, AuthorRole
 from semantic_kernel.filters.filter_types import FilterTypes
+from semantic_kernel.functions import kernel_function
 
 from agents.config import AgentSettings
 from agents.cosmos_client import CosmosContainers
 from agents.plugins.member_plugin import MemberPlugin
 from agents.plugins.project_plugin import ProjectPlugin
 from agents.plugins.contribution_plugin import ContributionPlugin
-from agents.plugins.meeting_plugin import MeetingPlugin
 from agents.plugins.team_balance_plugin import TeamBalancePlugin
-from agents.plugins.synergy_plugin import SynergyPlugin
 from agents.plugins.sub_agent_plugin import (
     SubAgentPlugin,
     SubAgentCallback,
@@ -84,6 +83,68 @@ def _load_prompt(mode: AgentMode) -> str:
     return (_PROMPTS_DIR / filename).read_text(encoding="utf-8")
 
 
+# ---------------------------------------------------------------------------
+# Orchestrator専用 Plugin ラッパー
+# SKはプラグイン全体を登録する仕様のため、薄いラッパーで公開ツールを制限する。
+# サブエージェントは独立した Kernel インスタンスを持つので影響しない。
+# ---------------------------------------------------------------------------
+
+class _MemberLookupPlugin:
+    """list_all_members + get_member_schedule のみ公開（分析ツールはサブエージェントへ）."""
+
+    def __init__(self, base: MemberPlugin) -> None:
+        self._base = base
+
+    @kernel_function(description="全メンバーの概要一覧（id/name/role/skills/経験年数/月次コスト/github_username）を返す")
+    def list_all_members(self) -> str:
+        return self._base.list_all_members()
+
+    @kernel_function(description="メンバーが参加している全プロジェクトの在籍期間（役割/開始日/終了日）を返す")
+    def get_member_schedule(
+        self,
+        member_id: Annotated[str, "メンバーの名前またはemail（例: 中村 大樹）"],
+    ) -> str:
+        return self._base.get_member_schedule(member_id)
+
+
+class _CostPlugin:
+    """calc_project_cost のみ公開（アサイン提案時のコスト試算専用）."""
+
+    def __init__(self, base: ContributionPlugin) -> None:
+        self._base = base
+
+    @kernel_function(description="提案チームの月次コスト合計×プロジェクト期間＝総コストを試算する")
+    def calc_project_cost(
+        self,
+        member_ids_json: Annotated[str, 'メンバーIDのJSON配列 例: ["kobayashi@abc.com", "maeda@abc.com"]'],
+        project_id: Annotated[str, "プロジェクト名またはID"],
+    ) -> str:
+        return self._base.calc_project_cost(member_ids_json, project_id)
+
+
+class _TeamCheckPlugin:
+    """evaluate_team_balance + find_skill_gaps のみ公開（compare_members はサブエージェントへ）."""
+
+    def __init__(self, base: TeamBalancePlugin) -> None:
+        self._base = base
+
+    @kernel_function(description="提案チームのスキルカバレッジ・経験バランス・リーダー適性を評価してMarkdownで返す")
+    def evaluate_team_balance(
+        self,
+        proposed_team_json: Annotated[str, "提案チームのJSON配列。各要素に member_id/name/role/skills/years_experience/monthly_cost を含む"],
+        project_requirements_json: Annotated[str, "プロジェクト要件のJSON。required_skills/period/overview を含む"],
+    ) -> str:
+        return self._base.evaluate_team_balance(proposed_team_json, project_requirements_json)
+
+    @kernel_function(description="プロジェクト必要スキルと提案チームの保有スキルを照合し、不足スキル一覧とカバー率を返す（DB集計・LLM不要）")
+    def find_skill_gaps(
+        self,
+        project_id: Annotated[str, "プロジェクト名またはID"],
+        proposed_member_ids_json: Annotated[str, 'メンバーIDのJSON配列。例: ["a@x.com","b@x.com"]。空配列なら現在のアサインを使う'] = "[]",
+    ) -> str:
+        return self._base.find_skill_gaps(project_id, proposed_member_ids_json)
+
+
 class TalentScopeOrchestrator:
     """全モードのエージェント呼び出しを担当するオーケストレータ."""
 
@@ -103,30 +164,27 @@ class TalentScopeOrchestrator:
             )
         )
         containers = CosmosContainers(settings)
+        # ルーティング情報取得用の最小限ツールのみ公開（ラッパーで制限）
         kernel.add_plugin(
-            MemberPlugin(containers.members, containers.projects),
+            _MemberLookupPlugin(MemberPlugin(containers.members, containers.projects)),
             plugin_name="MemberPlugin",
         )
         kernel.add_plugin(
             ProjectPlugin(containers.projects, containers.members),
             plugin_name="ProjectPlugin",
         )
+        # アサイン提案時のコスト試算のみ
         kernel.add_plugin(
-            ContributionPlugin(containers.members, containers.projects),
+            _CostPlugin(ContributionPlugin(containers.members, containers.projects)),
             plugin_name="ContributionPlugin",
         )
+        # アサイン提案時のチェックのみ（compare_members は除外）
         kernel.add_plugin(
-            MeetingPlugin(containers.meetings, containers.projects, containers.members),
-            plugin_name="MeetingPlugin",
-        )
-        kernel.add_plugin(
-            TeamBalancePlugin(settings, containers.members, containers.projects),
+            _TeamCheckPlugin(TeamBalancePlugin(settings, containers.members, containers.projects)),
             plugin_name="TeamBalancePlugin",
         )
-        kernel.add_plugin(
-            SynergyPlugin(containers.projects, containers.meetings, containers.members),
-            plugin_name="SynergyPlugin",
-        )
+        # MeetingPlugin: 削除（ConversationAnalysisAgent / MemberProfilerAgent が保有）
+        # SynergyPlugin: 削除（TeamEvaluatorAgent が保有）
 
         # サブエージェント 5 つを構築して SubAgentPlugin に注入
         conversation_sa = ConversationAnalysisAgent(settings, containers)
@@ -293,7 +351,10 @@ class TalentScopeOrchestrator:
                 exec_history.add_message(msg)
             exec_history.add_user_message(
                 f"{user_message}\n\n---\n"
-                f"[以下のプランに従い、各ステップのデータを実際に取得してから回答すること]\n\n{plan_hint}"
+                f"[以下のプランを参考にデータを取得すること。"
+                f"ただし、あるステップで情報が取得できない・データが不足している・別の手段の方が適切と判断した場合は、"
+                f"代替ツールやサブエージェントを自律的に選択して補完してよい。"
+                f"プランは出発点であり、硬直した手順書ではない。状況に応じて柔軟に判断すること。]\n\n{plan_hint}"
             )
         else:
             exec_history = history
@@ -349,11 +410,35 @@ class TalentScopeOrchestrator:
         tool_token = _tool_callback_var.set(on_tool_call) if on_tool_call is not None else None
         sub_token = set_subagent_callback(on_subagent_call) if on_subagent_call is not None else None
         clr_token = set_clarification_callback(on_clarification) if on_clarification is not None else None
+        _ASSIGNMENT_REQUIRED = [
+            "## 推奨チーム構成",
+            "## コスト試算",
+            "## スキルギャップ分析",
+        ]
         try:
             async for response in agent.invoke(messages=history, arguments=_INVOKE_ARGS):
                 text = str(response.message) if response.message else ""
                 if text:
                     full_response += text
+
+            # ASSIGNMENT モード専用: 必須セクション未達なら最大2回続行を強制
+            if mode == AgentMode.ASSIGNMENT:
+                for _ in range(2):
+                    if all(s in full_response for s in _ASSIGNMENT_REQUIRED):
+                        break
+                    history.add_message(
+                        ChatMessageContent(role=AuthorRole.ASSISTANT, content=full_response)
+                    )
+                    history.add_user_message(
+                        "レポートが未完成です。残りのステップ（ドラフト組成・スキルギャップ確認・"
+                        "チームレビュー・コスト試算）を続行し、出力形式に従って最終レポートを全文出力してください。"
+                    )
+                    full_response = ""
+                    async for response in agent.invoke(messages=history, arguments=_INVOKE_ARGS):
+                        text = str(response.message) if response.message else ""
+                        if text:
+                            full_response += text
+
         finally:
             if tool_token is not None:
                 _tool_callback_var.reset(tool_token)

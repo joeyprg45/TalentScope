@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+import contextlib
 import time
 import uuid
 from datetime import datetime, timezone
@@ -161,6 +162,46 @@ def _make_clarification_callback(
     return on_clarification
 
 
+@contextlib.asynccontextmanager
+async def _clarification_receiver_ctx(
+    ws: WebSocket,
+    pending: dict[str, asyncio.Future[str]],
+    trace_log: list[dict],
+):
+    """エージェント実行中に clarification_response を並行受信して Future を解決する。"""
+    async def _receiver() -> None:
+        while True:
+            try:
+                msg = await ws.receive_json()
+                if msg.get("type") == "clarification_response":
+                    cid = str(msg.get("id", ""))
+                    answer_id = (msg.get("answer_id") or "").strip()
+                    answer_text = (msg.get("answer_text") or "").strip()
+                    answer = answer_text or answer_id or "（回答なし）"
+                    trace_log.append({
+                        "timestamp": _now(),
+                        "type": "clarification_response",
+                        "id": cid,
+                        "answer": answer,
+                    })
+                    if cid in pending:
+                        fut = pending[cid]
+                        if not fut.done():
+                            fut.set_result(answer)
+            except asyncio.CancelledError:
+                return
+            except Exception:
+                return
+
+    task = asyncio.create_task(_receiver())
+    try:
+        yield
+    finally:
+        task.cancel()
+        with contextlib.suppress(asyncio.CancelledError):
+            await task
+
+
 def _serialize_sk_history(history: ChatHistory) -> list[dict]:
     result = []
     for msg in history.messages:
@@ -172,6 +213,32 @@ def _serialize_sk_history(history: ChatHistory) -> list[dict]:
         except Exception:  # noqa: BLE001
             pass
     return result
+
+
+async def _generate_report_summary(markdown: str, report_type: str, settings) -> str:
+    """生成済みレポートを1〜2文で要約する。エラー時はフォールバック文を返す。"""
+    from openai import AsyncAzureOpenAI
+    type_label = "アサイン提案" if report_type == "assignment" else "スキル分析"
+    prompt = (
+        f"以下の{type_label}レポートを1〜2文の日本語で簡潔に要約してください。"
+        "提案の要点（誰を・どのプロジェクトに・何のために、など）を含めてください。\n\n"
+        f"{markdown[:3000]}"
+    )
+    try:
+        client = AsyncAzureOpenAI(
+            api_key=settings.azure_openai_api_key,
+            azure_endpoint=settings.azure_openai_endpoint,
+            api_version=settings.azure_openai_api_version,
+        )
+        response = await client.chat.completions.create(
+            model=settings.azure_openai_chat_deployment,
+            messages=[{"role": "user", "content": prompt}],
+            temperature=0,
+            max_tokens=150,
+        )
+        return (response.choices[0].message.content or "").strip()
+    except Exception:  # noqa: BLE001
+        return f"{type_label}レポートを作成しました。"
 
 
 def _persist_chat(
@@ -284,6 +351,7 @@ async def chat_ws(ws: WebSocket, session_id: str = Query(..., min_length=1)) -> 
                         await ws.send_json({
                             "type": "chat_loaded",
                             "messages": chat_display_msgs,
+                            "trace_log": trace_log,
                         })
                     except Exception:  # noqa: BLE001
                         chat_display_msgs = []
@@ -347,43 +415,9 @@ async def chat_ws(ws: WebSocket, session_id: str = Query(..., min_length=1)) -> 
                        mode=AgentMode.ASSIGNMENT.value,
                        system_prompt=session.ceo_layer if session.ceo_layer else _load_prompt(AgentMode.ASSIGNMENT))
                     try:
-                        full_report = await orch.chat_batch(
-                            user_message=content,
-                            mode=AgentMode.ASSIGNMENT,
-                            history=session.history,
-                            constraints=constraints,
-                            qualitative=qualitative,
-                            ceo_layer=session.ceo_layer,
-                            on_tool_call=tool_cb,
-                            on_subagent_call=subagent_cb,
-                            on_clarification=clarification_cb,
-                        )
-
-                        # 評価ループ（最大2回 = 初回生成 + 再生成2回で合計3回まで）
-                        for _attempt in range(2):
-                            _eval_result = await evaluate_report(full_report, constraints, qualitative, settings)
-                            _t(trace_log, type="eval_result", attempt=_attempt,
-                               passed=_eval_result["pass"],
-                               violations=_eval_result["absolute"]["violations"],
-                               advice=_eval_result["qualitative"]["advice"])
-                            if _eval_result["pass"]:
-                                break
-                            _feedback_parts: list[str] = []
-                            if not _eval_result["absolute"]["ok"]:
-                                _violations = "\n".join(f"- {v}" for v in _eval_result["absolute"]["violations"])
-                                _feedback_parts.append(f"【絶対条件違反】以下を必ず修正すること:\n{_violations}")
-                            if not _eval_result["qualitative"]["ok"] and _eval_result["qualitative"]["advice"]:
-                                _feedback_parts.append(f"【定性方針への改善指摘】\n{_eval_result['qualitative']['advice']}")
-                            if not _feedback_parts:
-                                break
-                            _feedback_msg = (
-                                "【評価エージェントのフィードバック】\n\n"
-                                + "\n\n".join(_feedback_parts)
-                                + "\n\n上記の問題を反映して、前回のレポートを修正してください。"
-                                "データの再取得は不要です。レポートを修正して全文を出力してください。"
-                            )
+                        async with _clarification_receiver_ctx(ws, pending_clarifications, trace_log):
                             full_report = await orch.chat_batch(
-                                user_message=_feedback_msg,
+                                user_message=content,
                                 mode=AgentMode.ASSIGNMENT,
                                 history=session.history,
                                 constraints=constraints,
@@ -393,6 +427,58 @@ async def chat_ws(ws: WebSocket, session_id: str = Query(..., min_length=1)) -> 
                                 on_subagent_call=subagent_cb,
                                 on_clarification=clarification_cb,
                             )
+
+                            # 評価ループ（最大2回 = 初回生成 + 再生成2回で合計3回まで）
+                            for _attempt in range(2):
+                                _eval_result = await evaluate_report(full_report, constraints, qualitative, settings)
+                                _t(trace_log, type="eval_result", attempt=_attempt,
+                                   passed=_eval_result["pass"],
+                                   violations=_eval_result["absolute"]["violations"],
+                                   advice=_eval_result["qualitative"]["advice"])
+                                _total_constraints = len(constraints) if constraints else 0
+                                await ws.send_json({
+                                    "type": "eval_result",
+                                    "attempt": _attempt,
+                                    "passed": _eval_result["pass"],
+                                    "absolute_ok": _eval_result["absolute"]["ok"],
+                                    "violations": _eval_result["absolute"]["violations"],
+                                    "total_constraints": _total_constraints,
+                                    "passed_constraints": _total_constraints - len(_eval_result["absolute"]["violations"]),
+                                    "qualitative_ok": _eval_result["qualitative"]["ok"],
+                                    "advice": _eval_result["qualitative"]["advice"],
+                                })
+                                if _eval_result["pass"]:
+                                    break
+                                _feedback_parts: list[str] = []
+                                if not _eval_result["absolute"]["ok"]:
+                                    _violations = "\n".join(f"- {v}" for v in _eval_result["absolute"]["violations"])
+                                    _feedback_parts.append(f"【絶対条件違反】以下を必ず修正すること:\n{_violations}")
+                                if not _eval_result["qualitative"]["ok"] and _eval_result["qualitative"]["advice"]:
+                                    _feedback_parts.append(f"【定性方針への改善指摘】\n{_eval_result['qualitative']['advice']}")
+                                if not _feedback_parts:
+                                    break
+                                await ws.send_json({
+                                    "type": "eval_correction_start",
+                                    "attempt": _attempt,
+                                })
+                                _feedback_msg = (
+                                    "【評価エージェントのフィードバック】\n\n"
+                                    + "\n\n".join(_feedback_parts)
+                                    + "\n\n上記の問題を反映して、前回のレポートを修正してください。"
+                                    "必要であればツールやサブエージェントを使って追加情報を収集し、再推論してください。"
+                                    "修正済みレポートを全文出力してください。"
+                                )
+                                full_report = await orch.chat_batch(
+                                    user_message=_feedback_msg,
+                                    mode=AgentMode.ASSIGNMENT,
+                                    history=session.history,
+                                    constraints=constraints,
+                                    qualitative=qualitative,
+                                    ceo_layer=session.ceo_layer,
+                                    on_tool_call=tool_cb,
+                                    on_subagent_call=subagent_cb,
+                                    on_clarification=clarification_cb,
+                                )
 
                         first_heading = next((l for l in full_report.split("\n") if l.startswith("#")), None)
                         title = first_heading.replace("#", "").strip() if first_heading else "アサイン提案レポート"
@@ -408,10 +494,10 @@ async def chat_ws(ws: WebSocket, session_id: str = Query(..., min_length=1)) -> 
                         )
                         session.current_report = full_report
                         session.current_report_id = stored.id
-                        assistant_note = f"アサイン提案「{title}」を作成しました。レポートタブで確認できます。"
+                        assistant_note = await _generate_report_summary(full_report, "assignment", settings)
                         _t(trace_log, type="assistant_response", content=assistant_note)
                         await ws.send_json({"type": "report_chunk", "text": full_report})
-                        await ws.send_json({"type": "report_done", "report_type": "assignment", "report_id": stored.id})
+                        await ws.send_json({"type": "report_done", "report_type": "assignment", "report_id": stored.id, "summary": assistant_note})
                         if chat_id:
                             chat_display_msgs.append({"role": "user", "content": content})
                             chat_display_msgs.append({"role": "assistant", "content": assistant_note})
@@ -423,17 +509,18 @@ async def chat_ws(ws: WebSocket, session_id: str = Query(..., min_length=1)) -> 
                     _t(trace_log, type="agent_invocation",
                        mode=AgentMode.SKILL_ANALYSIS.value,
                        system_prompt=session.ceo_layer if session.ceo_layer else _load_prompt(AgentMode.SKILL_ANALYSIS))
-                    full_report = await orch.chat_batch(
-                        user_message=content,
-                        mode=AgentMode.SKILL_ANALYSIS,
-                        history=session.history,
-                        constraints=constraints,
-                        qualitative=qualitative,
-                        ceo_layer=session.ceo_layer,
-                        on_tool_call=tool_cb,
-                        on_subagent_call=subagent_cb,
-                        on_clarification=clarification_cb,
-                    )
+                    async with _clarification_receiver_ctx(ws, pending_clarifications, trace_log):
+                        full_report = await orch.chat_batch(
+                            user_message=content,
+                            mode=AgentMode.SKILL_ANALYSIS,
+                            history=session.history,
+                            constraints=constraints,
+                            qualitative=qualitative,
+                            ceo_layer=session.ceo_layer,
+                            on_tool_call=tool_cb,
+                            on_subagent_call=subagent_cb,
+                            on_clarification=clarification_cb,
+                        )
                     _heading_count = full_report.count("\n##") + full_report.count("\n#")
                     _is_complete = len(full_report.strip()) >= 300 and _heading_count >= 2
                     if not _is_complete:
@@ -456,10 +543,10 @@ async def chat_ws(ws: WebSocket, session_id: str = Query(..., min_length=1)) -> 
                             member_id=None,
                             project_id=None,
                         )
-                        skill_note = f"スキル分析「{title}」を作成しました。レポートタブで確認できます。"
+                        skill_note = await _generate_report_summary(full_report, "skill", settings)
                         _t(trace_log, type="assistant_response", content=skill_note)
                         await ws.send_json({"type": "report_chunk", "text": full_report})
-                        await ws.send_json({"type": "report_done", "report_type": "skill", "report_id": stored.id})
+                        await ws.send_json({"type": "report_done", "report_type": "skill", "report_id": stored.id, "summary": skill_note})
                         if chat_id:
                             chat_display_msgs.append({"role": "user", "content": content})
                             chat_display_msgs.append({"role": "assistant", "content": skill_note})
@@ -477,17 +564,18 @@ async def chat_ws(ws: WebSocket, session_id: str = Query(..., min_length=1)) -> 
                         "2行目以降に完全な修正済みレポートのMarkdownを出力してください。"
                         "修正対象以外の項目は元のレポートの内容をそのまま維持してください。"
                     )
-                    full_response = await orch.chat_batch(
-                        user_message=refine_msg,
-                        mode=AgentMode.ASSIGNMENT,
-                        history=session.history,
-                        constraints=constraints,
-                        qualitative=qualitative,
-                        ceo_layer=session.ceo_layer,
-                        on_tool_call=tool_cb,
-                        on_subagent_call=subagent_cb,
-                        on_clarification=clarification_cb,
-                    )
+                    async with _clarification_receiver_ctx(ws, pending_clarifications, trace_log):
+                        full_response = await orch.chat_batch(
+                            user_message=refine_msg,
+                            mode=AgentMode.ASSIGNMENT,
+                            history=session.history,
+                            constraints=constraints,
+                            qualitative=qualitative,
+                            ceo_layer=session.ceo_layer,
+                            on_tool_call=tool_cb,
+                            on_subagent_call=subagent_cb,
+                            on_clarification=clarification_cb,
+                        )
                     lines = full_response.strip().split("\n", 1)
                     if lines[0].startswith("変更点"):
                         summary = lines[0].split(":", 1)[-1].strip()
@@ -544,20 +632,21 @@ async def chat_ws(ws: WebSocket, session_id: str = Query(..., min_length=1)) -> 
 
                     # Phase 2: Executor
                     response_chunks: list[str] = []
-                    async for chunk in orch.chat(
-                        user_message=content,
-                        mode=AgentMode.BASE_CHAT,
-                        history=session.history,
-                        plan_hint=full_plan,
-                        constraints=constraints,
-                        qualitative=qualitative,
-                        ceo_layer=session.ceo_layer,
-                        on_tool_call=tool_cb,
-                        on_subagent_call=subagent_cb,
-                        on_clarification=clarification_cb,
-                    ):
-                        await ws.send_json({"type": "chunk", "text": chunk})
-                        response_chunks.append(chunk)
+                    async with _clarification_receiver_ctx(ws, pending_clarifications, trace_log):
+                        async for chunk in orch.chat(
+                            user_message=content,
+                            mode=AgentMode.BASE_CHAT,
+                            history=session.history,
+                            plan_hint=full_plan,
+                            constraints=constraints,
+                            qualitative=qualitative,
+                            ceo_layer=session.ceo_layer,
+                            on_tool_call=tool_cb,
+                            on_subagent_call=subagent_cb,
+                            on_clarification=clarification_cb,
+                        ):
+                            await ws.send_json({"type": "chunk", "text": chunk})
+                            response_chunks.append(chunk)
                     full_response_text = "".join(response_chunks)
                     _t(trace_log, type="assistant_response", content=full_response_text)
                     await ws.send_json({"type": "done"})

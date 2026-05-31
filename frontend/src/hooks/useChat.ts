@@ -13,6 +13,83 @@ import { getToolLabel, getSubAgentLabel } from "@/lib/toolLabels";
 const MAX_RECONNECT = 5;
 const RECONNECT_BASE_MS = 1000;
 
+function replayTrace(traceLog: unknown[]): ToolCallItem[][] {
+  const result: ToolCallItem[][] = [];
+  let current: ToolCallItem[] = [];
+  let currentSubagentId: string | null = null;
+  let inTurn = false;
+
+  for (const event of traceLog) {
+    const e = event as Record<string, unknown>;
+
+    if (e.type === "user_message") {
+      inTurn = true;
+      current = [];
+      currentSubagentId = null;
+      continue;
+    }
+
+    if (!inTurn) continue;
+
+    if (e.type === "planner_output") {
+      const plan = (e.plan as string) || "";
+      if (plan) {
+        current = [
+          { id: crypto.randomUUID(), toolName: "plan", displayName: "分析プラン",
+            status: "done", kind: "plan", planText: plan },
+          ...current,
+        ];
+      }
+      continue;
+    }
+
+    if (e.type === "tool_call") {
+      const toolName = e.tool_name as string;
+      if (e.status !== "start" || toolName.startsWith("SubAgentPlugin-")) continue;
+      const args = e.args as Record<string, string> | undefined;
+      const item: ToolCallItem = {
+        id: crypto.randomUUID(), toolName,
+        displayName: getToolLabel(toolName, args),
+        status: "done", args, kind: "tool",
+      };
+      if (currentSubagentId) {
+        current = current.map((t) =>
+          t.id === currentSubagentId ? { ...t, children: [...(t.children ?? []), item] } : t,
+        );
+      } else {
+        current = [...current, item];
+      }
+      continue;
+    }
+
+    if (e.type === "subagent_event") {
+      const agentName = e.agent_name as string;
+      const args = e.args as Record<string, string> | undefined;
+      if (e.status === "start") {
+        const item: ToolCallItem = {
+          id: crypto.randomUUID(), toolName: agentName,
+          displayName: getSubAgentLabel(agentName, args),
+          status: "done", args, kind: "subagent", children: [],
+        };
+        currentSubagentId = item.id;
+        current = [...current, item];
+      } else {
+        currentSubagentId = null;
+      }
+      continue;
+    }
+
+    if (e.type === "assistant_response") {
+      if (current.length > 0) result.push(current);
+      current = [];
+      inTurn = false;
+      currentSubagentId = null;
+    }
+  }
+  if (current.length > 0) result.push(current);
+  return result;
+}
+
 function getOrCreateChatId(): string {
   const stored = localStorage.getItem("talentscope_chat_id");
   if (stored) return stored;
@@ -85,15 +162,24 @@ export function useChat() {
 
         if (data.type === "chat_loaded") {
           const msgs = (data.messages as Array<{ role: string; content: string }>) ?? [];
+          const toolLogs = replayTrace((data.trace_log as unknown[]) ?? []);
+          let assistantIdx = 0;
           setMessages(
             msgs
               .filter((m) => m.content.trim())
-              .map((m) => ({
-                id: crypto.randomUUID(),
-                role: m.role as "user" | "assistant",
-                content: m.content,
-                isStreaming: false,
-              })),
+              .map((m) => {
+                if (m.role !== "assistant") {
+                  return { id: crypto.randomUUID(), role: "user" as const, content: m.content, isStreaming: false };
+                }
+                const tl = toolLogs[assistantIdx++];
+                return {
+                  id: crypto.randomUUID(),
+                  role: "assistant" as const,
+                  content: m.content,
+                  isStreaming: false,
+                  toolLog: tl && tl.length > 0 ? tl : undefined,
+                };
+              }),
           );
         } else if (data.type === "tool_call") {
           const toolName = data.tool_name as string;
@@ -156,6 +242,39 @@ export function useChat() {
             );
             setToolCallLog([...toolCallLogRef.current]);
           }
+        } else if (data.type === "eval_result") {
+          const passed = data.passed as boolean;
+          const attempt = data.attempt as number;
+          const evalItem: ToolCallItem = {
+            id: crypto.randomUUID(),
+            toolName: "eval_result",
+            displayName: passed
+              ? `評価通過 (${attempt + 1}回目)`
+              : `評価不合格 (${attempt + 1}回目) — 修正指示を送信`,
+            status: "done",
+            kind: "eval",
+            evalPassed: passed,
+            evalAttempt: attempt,
+            evalViolations: (data.violations as string[]) ?? [],
+            evalAdvice: (data.advice as string) ?? "",
+            evalAbsoluteOk: data.absolute_ok as boolean,
+            evalQualitativeOk: data.qualitative_ok as boolean,
+            evalTotalConstraints: data.total_constraints as number,
+            evalPassedConstraints: data.passed_constraints as number,
+          };
+          toolCallLogRef.current = [...toolCallLogRef.current, evalItem];
+          setToolCallLog([...toolCallLogRef.current]);
+        } else if (data.type === "eval_correction_start") {
+          const attempt = data.attempt as number;
+          const corrItem: ToolCallItem = {
+            id: crypto.randomUUID(),
+            toolName: "eval_correction_start",
+            displayName: `修正フェーズ開始 (${attempt + 1}回目)`,
+            status: "running",
+            kind: "eval_correction",
+          };
+          toolCallLogRef.current = [...toolCallLogRef.current, corrItem];
+          setToolCallLog([...toolCallLogRef.current]);
         } else if (data.type === "mode_detected") {
           setMessages((prev) => {
             const last = prev.at(-1);
@@ -259,18 +378,19 @@ export function useChat() {
               return last?.isStreaming ? prev.slice(0, -1) : prev;
             });
           } else {
+            const summary = (data.summary as string | undefined) ?? "";
             setMessages((prev) => {
               const last = prev.at(-1);
               const base = last?.isStreaming ? prev.slice(0, -1) : prev;
-              if (frozenLog.length === 0) return base;
+              if (frozenLog.length === 0 && !summary) return base;
               return [
                 ...base,
                 {
                   id: crypto.randomUUID(),
                   role: "assistant" as const,
-                  content: "",
+                  content: summary,
                   isStreaming: false,
-                  toolLog: frozenLog,
+                  toolLog: frozenLog.length > 0 ? frozenLog : undefined,
                 },
               ];
             });

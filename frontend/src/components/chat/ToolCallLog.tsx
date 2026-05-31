@@ -34,6 +34,52 @@ function PlanItem({ item }: { item: ToolCallItem }) {
   );
 }
 
+function EvalItem({ item, frozen }: { item: ToolCallItem; frozen: boolean }) {
+  const passed = item.evalPassed;
+  return (
+    <li className={`my-1 rounded-lg px-3 py-2 text-[11px] border ${
+      passed
+        ? "border-emerald-300 bg-emerald-50/60 dark:bg-emerald-950/30"
+        : "border-amber-300 bg-amber-50/60 dark:bg-amber-950/30"
+    }`}>
+      <div className="flex items-center gap-1.5 font-medium">
+        <span className={passed ? "text-emerald-600 dark:text-emerald-400" : "text-amber-600 dark:text-amber-400"}>
+          {passed ? "✓" : "✗"}
+        </span>
+        <span>{item.displayName}</span>
+      </div>
+      <div className="mt-1 text-muted-foreground">
+        絶対条件: {item.evalPassedConstraints}/{item.evalTotalConstraints} 通過
+        {item.evalViolations && item.evalViolations.length > 0 && (
+          <ul className="mt-0.5 list-disc pl-4 text-red-600 dark:text-red-400">
+            {item.evalViolations.map((v, i) => <li key={i}>{v}</li>)}
+          </ul>
+        )}
+      </div>
+      <div className="mt-0.5 text-muted-foreground">
+        定性方針: {item.evalQualitativeOk ? "✓ 通過" : "✗ 未通過"}
+        {item.evalAdvice && (
+          <p className="mt-0.5 text-amber-700 dark:text-amber-400">{item.evalAdvice}</p>
+        )}
+      </div>
+    </li>
+  );
+}
+
+function EvalCorrectionItem({ item, frozen }: { item: ToolCallItem; frozen: boolean }) {
+  const isRunning = !frozen && item.status === "running";
+  return (
+    <li className="flex items-center gap-2 text-[11px] my-0.5 text-indigo-600 dark:text-indigo-400 font-medium">
+      {isRunning ? (
+        <span className="h-2.5 w-2.5 shrink-0 animate-spin rounded-full border-2 border-t-transparent border-indigo-500" />
+      ) : (
+        <span className="h-2.5 w-2.5 shrink-0 text-indigo-500">↻</span>
+      )}
+      <span>{item.displayName}</span>
+    </li>
+  );
+}
+
 function ToolItem({ item, frozen, depth = 0 }: { item: ToolCallItem; frozen: boolean; depth?: number }) {
   const isSub = item.kind === "subagent";
   const isRunning = !frozen && item.status === "running";
@@ -116,7 +162,11 @@ export function ToolCallLog({ items, frozen = false }: Props) {
           {items.map((item) =>
             item.kind === "plan"
               ? <PlanItem key={item.id} item={item} />
-              : <ToolItem key={item.id} item={item} frozen={frozen} />
+              : item.kind === "eval"
+                ? <EvalItem key={item.id} item={item} frozen={frozen} />
+                : item.kind === "eval_correction"
+                  ? <EvalCorrectionItem key={item.id} item={item} frozen={frozen} />
+                  : <ToolItem key={item.id} item={item} frozen={frozen} />
           )}
         </ul>
       </div>
